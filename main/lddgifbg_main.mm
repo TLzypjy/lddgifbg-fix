@@ -809,6 +809,9 @@ static double gCloseBlockUntil = 0; // 1.35: 收起钩子后的自动重开屏�
                                     // 实机证实上划后系统会把通知以药丸形式重新上岛(呈现层经历
                                     // 清空->非空), 会话被重开导致背景重新铺回; 屏蔽期内 nil->非nil
                                     // 不自动开会话, 真正的新通知由 setPresentablePendingSnapshot: 钩子补获
+static BOOL gSawWideInSession = NO; // 1.38: 本会话内已铺过宽横幅(≥250x40) —— 上划塌缩检测的前提
+static double gNotifPresentTs = 0;  // 1.38: 本次通知会话的横幅弹出时刻 —— 上划塌缩后屏蔽到
+                                    // 弹出时刻+9.5s(横幅预期自然到期), 药丸重新上岛不再铺回
 // 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
@@ -1317,12 +1320,16 @@ static void LDDIslandLayout(id self) {
                                 gNotifSession = YES;
                                 gNotifWithdrawn = NO;
                                 gPrevNil = NO;
+                                gSawWideInSession = NO;
+                                gNotifPresentTs = nowBlk;
                                 static int newlog = 0;
                                 if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
                             } else if (!gNotifSession && !gPrevNil && nowBlk >= gCloseBlockUntil) {
                                 // 屏蔽期结束后 PVC 仍非空(新横幅未被快照钩子捕获)兜底开启
                                 gNotifSession = YES;
                                 gNotifWithdrawn = NO;
+                                gSawWideInSession = NO;
+                                gNotifPresentTs = nowBlk;
                                 static int rslog = 0;
                                 if (rslog < 30) { rslog++; ProbeWrite("POLL-SESSION-RESUME"); }
                             }
@@ -1372,6 +1379,20 @@ static void LDDIslandLayout(id self) {
                 show = YES;
                 static int fid2 = 0;
                 if (fid2 < 40) { fid2++; char fn[96]; snprintf(fn, sizeof(fn), "H52-SHOW-FACEID-SQ-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(fn); }
+            } else if (gNotifSession && !gNotifWithdrawn && gSawWideInSession
+                       && (b0.w < 150.0 || b0.h < 40.0)) {
+                // 1.38: 上划塌缩检测 —— 实机证实上划横幅不触发任何收起钩子/触摸回调, 系统只是把
+                // 横幅缩回药丸形态且通知保持活跃(v1.37 日志: SHOW h=92->83 后药丸反复重新上岛,
+                // 背景滞留约 7s = 通知剩余生命周期)。"已铺过宽横幅的会话出现紧凑布局"即用户划掉:
+                // 立即结束会话+拆背景, 并屏蔽到本条通知预期自然到期(弹出时刻+9.5s),
+                // 药丸重新上岛不再把背景铺回去。
+                gNotifSession = NO;
+                gNotifWithdrawn = YES;
+                gNotifActive = NO;
+                gNotifTs = CFAbsoluteTimeGetCurrent();
+                gCloseBlockUntil = (gNotifPresentTs > 0 ? gNotifPresentTs : gNotifTs) + 9.5;
+                LDDTeardownMediaNow();
+                ProbeWrite("COLLAPSE-DISMISS");
             } else if (!seHit && nActive && b0.w >= 250.0 && b0.h >= 40.0) {
                 // 通知展开横幅(407x92/422x106)与重弹中间态(285x52/403x44)合并判定:
                 // 通知活跃窗口内 + 非 Live Activity 场景即铺。
@@ -1379,9 +1400,12 @@ static void LDDIslandLayout(id self) {
                 // 检测是通知横幅与 Live Activity(听歌/直播)的真正分界(1.9.145 段实机证实)。
                 // 录屏分支后移到通知之后 —— 旧版录屏分支截断通知判定, 录屏中来通知不铺背景。
                 show = YES;
+                gSawWideInSession = YES;   // 1.38: 本会话已见宽横幅(上划塌缩检测前提)
                 static int h52l = 0;
                 if (h52l < 40) { h52l++; char hn[96]; snprintf(hn, sizeof(hn), "H52-SHOW-NOTIF-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(hn); }
-            } else if (b0.w < 150.0 && LDDIsBannerContext((id)self)) {
+            } else if (b0.w < 150.0 && !gNotifWithdrawn && LDDIsBannerContext((id)self)) {
+                // 1.38: 补 gNotifWithdrawn 门 —— 用户上划(塌缩检测)后, 通知以药丸形态重新上岛
+                // 也不再铺背景(划掉即消失, 包括药丸形态)
                 // 通知收起窄条(129x38): 场景链含明确 Banner 类(通知横幅专属)才显示;
                 // 听歌/直播紧凑条同尺寸但链无 Banner 类(1.9.200 实机探针证实), 通知窗口内也稳定不铺。
                 show = YES;
@@ -2141,6 +2165,8 @@ static void PostRealNotification(void) {
                 gNotifActive = YES;
                 gNotifSession = YES;
                 gNotifWithdrawn = NO;   // 1.32: 预览投递清除收起标志
+                gSawWideInSession = NO;
+                gNotifPresentTs = gNotifTs;
                 // 1.9.163: 预览通知弹出时视频从头播放 (seek 0, 合法 CMTime)
                 if (gPlayer && gPlayerItem) {
                     typedef id (*Fn)(id, SEL, struct CMTimeRaw);
@@ -2160,7 +2186,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.37");
+    ProbeWrite("LDD-BUILD v1.38");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
