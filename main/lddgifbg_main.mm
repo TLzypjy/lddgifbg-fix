@@ -1299,22 +1299,33 @@ static void LDDIslandLayout(id self) {
                     if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
                         id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
                         double nowBlk = CFAbsoluteTimeGetCurrent();
+                        // 1.37: PVC 抖动防抖 —— 实机证实 presentedPresentableVC 在通知显示期间会
+                        // 间歇性返回 nil(无任何钩子触发, v1.36 日志 52054-52328 反复横跳),
+                        // 单次 nil 即终结会话会让背景闪灭("来通知不铺背景")。
+                        // 连续 nil 达 0.5s 才判会话结束; 划掉/超时仍走收起钩子当帧拆除(不受防抖影响)。
+                        static double gPvcNilSince = 0;
                         if (!pvc) {
-                            gPrevNil = YES;
-                            gNotifSession = NO;
-                        } else if (gPrevNil && nowBlk >= gCloseBlockUntil) {
-                            // 屏蔽期外的 nil->非nil 转换 = 新横幅上岛
-                            gNotifSession = YES;
-                            gNotifWithdrawn = NO;
-                            gPrevNil = NO;
-                            static int newlog = 0;
-                            if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
-                        } else if (!gNotifSession && !gPrevNil && nowBlk >= gCloseBlockUntil) {
-                            // 屏蔽期结束后 PVC 仍非空(新横幅未被快照钩子捕获)兜底开启
-                            gNotifSession = YES;
-                            gNotifWithdrawn = NO;
-                            static int rslog = 0;
-                            if (rslog < 30) { rslog++; ProbeWrite("POLL-SESSION-RESUME"); }
+                            if (!gPvcNilSince) gPvcNilSince = nowBlk;
+                            if (nowBlk - gPvcNilSince >= 0.5) {
+                                gPrevNil = YES;
+                                gNotifSession = NO;
+                            }
+                        } else {
+                            gPvcNilSince = 0;
+                            if (gPrevNil && nowBlk >= gCloseBlockUntil) {
+                                // 屏蔽期外的 nil->非nil 转换 = 新横幅上岛
+                                gNotifSession = YES;
+                                gNotifWithdrawn = NO;
+                                gPrevNil = NO;
+                                static int newlog = 0;
+                                if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
+                            } else if (!gNotifSession && !gPrevNil && nowBlk >= gCloseBlockUntil) {
+                                // 屏蔽期结束后 PVC 仍非空(新横幅未被快照钩子捕获)兜底开启
+                                gNotifSession = YES;
+                                gNotifWithdrawn = NO;
+                                static int rslog = 0;
+                                if (rslog < 30) { rslog++; ProbeWrite("POLL-SESSION-RESUME"); }
+                            }
                         }
                         gPollR = gNotifSession;
                         static int polllog = 0;
@@ -2149,7 +2160,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.36");
+    ProbeWrite("LDD-BUILD v1.37");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
