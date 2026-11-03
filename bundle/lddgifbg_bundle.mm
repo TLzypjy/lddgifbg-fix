@@ -1382,8 +1382,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [l1 setAutoresizingMask:98];
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
-    // 1.29: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.29";
+    // 1.30: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
+    NSString *ver = @"1.30";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
