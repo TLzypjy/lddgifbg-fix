@@ -1201,13 +1201,15 @@ static void LDDIslandLayout(id self) {
                     char cl[64];
                     snprintf(cl, sizeof(cl), "CAP-DETECT-%d-rp%d-w%.0f-h%.0f", cap ? 1 : 0, rpRec ? 1 : 0, b0.w, b0.h);
                     ProbeWrite(cl);
-                    // 1.29: 岛内位置探针 —— 录屏指示条与听歌条同尺寸同链, 采集 self 在容器内的
-                    // 偏移, 为下一版按左右位置区分做数据准备
+                    // 1.30: 岛内位置探针(加深两级) —— 录屏指示条与听歌条同尺寸同链, 记录容器链
+                    // x 偏移; 若用户要求"录屏时听歌条不铺", 下一版按左右位置精确区分
                     CGRect sf = ((CGRect(*)(id, SEL))objc_msgSend)(self, sel_registerName("frame"));
                     id sp2 = ((id(*)(id, SEL))objc_msgSend)((id)self, sel_registerName("superview"));
-                    CGRect pf2 = sp2 ? ((CGRect(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
-                    char pfl[160];
-                    snprintf(pfl, sizeof(pfl), "CAP-FRAME self-x%.0f-y%.0f supx%.0f w%.0f h%.0f", sf.ox, sf.oy, pf2.ox, b0.w, b0.h);
+                    CGRect spf = sp2 ? ((CGRect(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
+                    id spp = sp2 ? ((id(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("superview")) : nil;
+                    CGRect sppf = spp ? ((CGRect(*)(id, SEL))objc_msgSend)(spp, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
+                    char pfl[200];
+                    snprintf(pfl, sizeof(pfl), "CAP-FRAME self-x%.0f sup-x%.0f-w%.0f ggp-x%.0f-w%.0f pill-w%.0f", sf.ox, spf.ox, spf.w, sppf.ox, sppf.w, b0.w);
                     ProbeWrite(pfl);
                 }
             }
@@ -1218,10 +1220,31 @@ static void LDDIslandLayout(id self) {
             // 导致小岛关时听歌/直播窄条在通知后 30s 内误铺背景(时有时无)。
             //   nActive = 横幅在岛/刚离岛 2 秒内, 由三处刷新: ① BND init(新 destination)
             //   ② 关闭钩子(划走/超时收起, 留 2s 收起动画宽限) ③ 布局层保活(下方, 横幅形态容器即刷新)
-            // 1.29: 通知活跃窗口改双段 —— 呈现中(生命周期钩子 BND-PRESENT-SET 置位)最长 15s 硬顶
-            // (横幅自动收起钩子万一漏触发也不至于永久活跃); 已收起只留 2s 收起动画宽限。
-            // 旧版单段 2s 靠"布局保活"续命, 而保活对任何 >=250 宽的岛都刷新 —— 听歌展开条被永久续满窗口。
-            BOOL nActive = gNotifActive ? ((nowT - gNotifTs) < 15.0) : ((nowT - gNotifTs) < 2.0);
+            // 1.30: 通知活跃 = 三路信号取或 ——
+            //   ① 实时轮询呈现层 presentedPresentableVC(非 nil 即有横幅在岛, 对复用 destination 有效;
+            //      1.29 实机证实 _setPresentedPresentableVC: 在 iOS16.1 呈现路径不会被调用, 钩子信号落空)
+            //   ② BND init 后 15s 内(开机首条通知兜底)
+            //   ③ 收起钩子后 2s 收起动画宽限
+            BOOL presenting = NO;
+            {
+                static double gPollT = 0;
+                static BOOL gPollR = NO;
+                double nwP = CFAbsoluteTimeGetCurrent();
+                if (nwP - gPollT >= 0.2) {
+                    gPollT = nwP;
+                    gPollR = NO;
+                    if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
+                        id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
+                        gPollR = (pvc != nil);
+                        static int polllog = 0;
+                        if (polllog < 30) { polllog++; ProbeWrite(gPollR ? "POLL-PRESENTING" : "POLL-IDLE"); }
+                    }
+                }
+                presenting = gPollR;
+            }
+            BOOL nActive = presenting
+                         || (gNotifActive && ((nowT - gNotifTs) < 15.0))
+                         || (!gNotifActive && ((nowT - gNotifTs) < 2.0));
             dbgNA = nActive;
             // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
             // 与通知横幅尺寸完全重叠, 且同样触发布局层保活刷新 gNotifTs -> 1.9.204 的 nActive 门被击穿
@@ -1275,40 +1298,12 @@ static void LDDIslandLayout(id self) {
                 static int bnl = 0;
                 if (bnl < 8) { bnl++; ProbeWrite("BANNER-CTX-NARROW"); }
             } else if (capAll) {
-                // 录屏岛(小岛关也要铺): 正在录屏(capAll=isCaptured||RPScreenRecorder.isRecording)时,
-                // 非 Live Activity 场景(!seHit)即录屏条, 直接铺; 若录屏条也是 SceneElement 场景,
-                // 再看链上是否有明确录屏/捕获类。听歌/直播条链无录屏类, 录屏中也不误铺
-                // (1.9.203 教训: "录屏中所有岛都铺"把同尺寸的听歌条铺上了 -> seHit/链类双重收口)。
-                // 旧版要求链上必须命中录屏类才铺, iOS16.1 录屏条链常无此类 -> 录屏岛铺不上背景。
-                BOOL recHit = NO;
-                if (seHit) {
-                    int recDepth = 0; id recCur = self;
-                    while (recCur && recDepth < 8) {
-                        const char *rcn = class_getName((__bridge void *)object_getClass(recCur));
-                        if (rcn && (strstr(rcn, "Recording") || strstr(rcn, "Capture") || strstr(rcn, "ScreenCapture")
-                                    || strstr(rcn, "Mirror") || strstr(rcn, "LiveRender") || strstr(rcn, "Record")
-                                    || strstr(rcn, "Stinger"))) {
-                            recHit = YES;
-                            static int recl = 0;
-                            if (recl < 40) { recl++; char rr[160]; snprintf(rr, sizeof(rr), "REC-HIT-%s-d%d-w%.0f-h%.0f", rcn, recDepth, b0.w, b0.h); ProbeWrite(rr); }
-                            break;
-                        }
-                        recCur = ((id(*)(id, SEL))objc_msgSend)(recCur, sel_registerName("superview"));
-                        recDepth++;
-                    }
-                }
-                // 1.29: 录屏中只铺宽条(录屏开始的"屏幕录制"展开横幅)与链上有明确录屏类的岛。
-                // 实机证实紧凑录屏条(129x38/176x37)与听歌条同尺寸同视图链, 无法盲区分 ——
-                // 紧凑条不再因"正在录屏"一律铺(1.9.203 教训: 听歌+录屏时听歌条被误铺);
-                // CAP-FRAME 探针采集岛内位置数据, 下一版按左右位置精确区分。
-                if (recHit || (b0.w >= 250.0 && b0.h >= 40.0)) {
-                    show = YES;
-                    static int reclog3 = 0;
-                    if (reclog3 < 40) { reclog3++; char rb[96]; snprintf(rb, sizeof(rb), "REC-CAPTURED-ON-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb); }
-                } else {
-                    static int recsk = 0;
-                    if (recsk < 40) { recsk++; char rb2[96]; snprintf(rb2, sizeof(rb2), "REC-SKIP-COMPACT-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb2); }
-                }
+                // 1.30: 录屏中(正在屏幕录制)一律铺背景 —— 用户语义"录屏的时候岛上也要铺上背景"。
+                // 实机 CAP-FRAME 证实录屏紧凑指示条(129x38/176x37)与听歌条同尺寸同视图链且可双条并存,
+                // 无法盲区分, 不再按尺寸/链类收口; 听歌+录屏同时进行时听歌条也会被铺(仅录屏期间)。
+                show = YES;
+                static int reclog3 = 0;
+                if (reclog3 < 40) { reclog3++; char rb[96]; snprintf(rb, sizeof(rb), "REC-CAPTURED-ON-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb); }
             } else {
                 // 听歌/直播(展开/紧凑)及其他岛: 小岛关一律不铺
                 static int h52n = 0;
@@ -2073,7 +2068,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.29");
+    ProbeWrite("LDD-BUILD v1.30");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
