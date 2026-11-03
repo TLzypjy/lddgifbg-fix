@@ -800,9 +800,11 @@ static void LogReason(const char *tag, id e) {
 static id gPresentLayer = nil;
 static double gNotifTs = -9999.0;   // 1.9.179: 最近通知横幅呈现时间(CFAbsoluteTimeGetCurrent)
 static BOOL gNotifActive = NO;      // 1.9.181: 通知横幅活跃标志(init置YES, 自动关闭置NO)
-static BOOL gNotifWithdrawn = NO;   // 1.32: 收起钩子已触发(划掉/超时) —— 呈现层可能仍持有旧横幅
-                                    // 至其原生命周期结束(实机: 早划后 ~8s), 轮询以"VC 指针变化"
-                                    // 识别新通知; 收起后立即视为无横幅(划掉即清背景)
+static BOOL gNotifWithdrawn = NO;   // 1.33: 收起钩子已触发 —— 同帧压制判定 + 同步拆背景
+static BOOL gNotifSession = NO;     // 1.34: 通知会话中(nil->非nil 转换开启, 收起钩子/PVC清空结束)。
+                                    // 实机证实 presentedPresentableVC 每次查询可能返回新包装对象(指针
+                                    // 持续变化), 早划后还持旧 VC 至原生命周期(~8s) —— 指针追踪不可用;
+                                    // 只有"上一轮为 nil"才允许开启会话, 收起后的持续非 nil 不会重新铺背景
 // 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
@@ -928,6 +930,7 @@ static void (*origBNDWithdraw)(id, SEL, id);
 static void HookBNDWithdraw(id self, SEL _c, id req) {
     if (origBNDWithdraw) origBNDWithdraw(self, _c, req);
     gNotifActive = NO;
+    gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
     LDDTeardownMediaNow();   // 1.33: 划掉的当帧同步拆背景
@@ -937,6 +940,7 @@ static void (*origBNDDismiss)(id, SEL, BOOL, id, BOOL);
 static void HookBNDDismiss(id self, SEL _c, BOOL a, id r, BOOL f) {
     if (origBNDDismiss) origBNDDismiss(self, _c, a, r, f);
     gNotifActive = NO;
+    gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
     LDDTeardownMediaNow();
@@ -946,10 +950,49 @@ static void (*origBNDDismissOnly)(id, SEL, BOOL, id, BOOL);
 static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     if (origBNDDismissOnly) origBNDDismissOnly(self, _c, a, r, f);
     gNotifActive = NO;
+    gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
     LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISSONLY-CLEAR");
+}
+// 1.34: 补充收起变体与撤销入口(存在且签名精确匹配才挂, 防调用约定错位) —— 部分系统路径
+// 从这些方法收起横幅, 漏挂会让会话不结束、背景滞留。
+static void (*origBNDDismissOnlyForce)(id, SEL, BOOL, id, BOOL, BOOL);
+static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL c) {
+    if (origBNDDismissOnlyForce) origBNDDismissOnlyForce(self, _c, a, r, b, c);
+    gNotifActive = NO;
+    gNotifSession = NO;
+    gNotifWithdrawn = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    LDDTeardownMediaNow();
+    ProbeWrite("BND-DFORCE-CLEAR");
+}
+static void (*origBNDRevokeAll)(id, SEL, id, id, id);
+static void HookBNDRevokeAll(id self, SEL _c, id a, id b, id c) {
+    if (origBNDRevokeAll) origBNDRevokeAll(self, _c, a, b, c);
+    gNotifActive = NO;
+    gNotifSession = NO;
+    gNotifWithdrawn = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    LDDTeardownMediaNow();
+    ProbeWrite("BND-REVOKE-CLEAR");
+}
+// 1.34: 待呈现快照 setter —— 收起后 8s 内连发的新通知补获信号(PVC 未经历 nil 转换时
+// 轮询无法发现新横幅)。仅当呈现层当前确实持有横幅时才开启会话, 防 Post 阶段误开。
+static void (*origBNDSetSnap)(id, SEL, id);
+static void HookBNDSetSnap(id self, SEL _c, id v) {
+    if (origBNDSetSnap) origBNDSetSnap(self, _c, v);
+    if (v && gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
+        id cur = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
+        if (cur) {
+            gNotifSession = YES;
+            gNotifWithdrawn = NO;
+            gNotifActive = YES;
+            gNotifTs = CFAbsoluteTimeGetCurrent();
+            ProbeWrite("BND-SNAPSHOT-ARM");
+        }
+    }
 }
 // 1.29: 复用 destination 的呈现/收起信号 —— 实机日志证实 destination 常驻复用(每次开机仅 1 次 init),
 // 后续通知不再触发 init; 旧"布局保活"刷新 gNotifTs 成了"任何宽岛都算通知活跃"的毒源
@@ -961,11 +1004,13 @@ static void HookBNDSetPresented(id self, SEL _c, id vc) {
     if (origBNDSetPresented) origBNDSetPresented(self, _c, vc);
     if (vc) {
         gNotifActive = YES;
+        gNotifSession = YES;
         gNotifWithdrawn = NO;   // 1.32: 新呈现清除收起标志
         gNotifTs = CFAbsoluteTimeGetCurrent();
         ProbeWrite("BND-PRESENT-SET");
     } else {
         gNotifActive = NO;
+        gNotifSession = NO;
         gNotifTs = CFAbsoluteTimeGetCurrent();
         ProbeWrite("BND-PRESENT-CLEAR");
     }
@@ -1249,17 +1294,19 @@ static void LDDIslandLayout(id self) {
             // 导致小岛关时听歌/直播窄条在通知后 30s 内误铺背景(时有时无)。
             //   nActive = 横幅在岛/刚离岛 2 秒内, 由三处刷新: ① BND init(新 destination)
             //   ② 关闭钩子(划走/超时收起, 留 2s 收起动画宽限) ③ 布局层保活(下方, 横幅形态容器即刷新)
-            // 1.32: 通知活跃 = 横幅指针追踪 —— 实机证实 presentedPresentableVC 在横幅被早划后
-            // 仍持有旧 VC 至其原生命周期结束(~8s), 不能直接当"正在显示"用。改为:
-            //   ① 轮询 presentedPresentableVC(0.1s 缓存), 记住当前横幅指针;
-            //   ② 指针变化(或 nil->非 nil)= 新横幅上岛 -> 清除收起标志, 重新铺背景(连发通知不漏);
-            //   ③ 收起钩子(划掉/超时)置收起标志 -> 即使呈现层仍握旧 VC, 立即视为无横幅(划掉即清);
+            // 1.34: 通知活跃 = 会话模型 ——
+            //   ① 轮询 presentedPresentableVC(0.1s 缓存): 上一轮为 nil 且本轮非 nil = 新横幅上岛,
+            //      开启会话; 本轮为 nil = 会话结束。指针持续变化(每次查询新包装对象, 实机
+            //      POLL-NEW-PVC 连发 7 次)不再触发"新通知" —— 早划后呈现层持旧 VC 至原生命周期
+            //      (~8s)期间背景保持清除, 划掉即清、不再被重新铺回。
+            //   ② 收起钩子(划掉/超时): 会话立即结束 + 同步拆背景(TEARDOWN-NOW)。
+            //   ③ 收起后 8s 内连发的新通知: 由 setPresentablePendingSnapshot: 钩子补获(见下)。
             //   ④ BND init 后 15s 内兜底(开机首条通知)。
             BOOL presenting = NO;
             {
                 static double gPollT = 0;
                 static BOOL gPollR = NO;
-                static __unsafe_unretained id gLastPVC = nil;
+                static BOOL gPrevNil = YES;
                 double nwP = CFAbsoluteTimeGetCurrent();
                 if (nwP - gPollT >= 0.1) {
                     gPollT = nwP;
@@ -1267,22 +1314,22 @@ static void LDDIslandLayout(id self) {
                     if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
                         id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
                         if (!pvc) {
-                            gLastPVC = nil;
-                        } else if (pvc != gLastPVC) {
-                            gLastPVC = pvc;
+                            gPrevNil = YES;
+                            gNotifSession = NO;
+                        } else if (gPrevNil) {
+                            gNotifSession = YES;
                             gNotifWithdrawn = NO;
+                            gPrevNil = NO;
                             static int newlog = 0;
-                            if (newlog < 30) { newlog++; ProbeWrite("POLL-NEW-PVC"); }
+                            if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
                         }
-                        gPollR = (pvc != nil) && !gNotifWithdrawn;
+                        gPollR = gNotifSession;
                         static int polllog = 0;
                         if (polllog < 40) { polllog++; ProbeWrite(gPollR ? "POLL-PRESENTING" : "POLL-IDLE"); }
                     }
                 }
                 presenting = gPollR;
             }
-            // 1.33: 收起标志直接参与判定 —— 钩子置位后(同帧起)任何布局都不再重建背景,
-            // 不等 0.1s 轮询缓存回落; 收起钩子本身已同步拆掉背景(TEARDOWN-NOW)
             BOOL nActive = (presenting && !gNotifWithdrawn) || (gNotifActive && ((nowT - gNotifTs) < 15.0));
             dbgNA = nActive;
             // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
@@ -2088,6 +2135,7 @@ static void PostRealNotification(void) {
                 // 1.9.183: 预览通知呈现成功 -> 通知活跃生命周期绑定 RN 流程 (返回桌面收起/重弹全程显示, 不依赖 BND init)
                 gNotifTs = CFAbsoluteTimeGetCurrent();
                 gNotifActive = YES;
+                gNotifSession = YES;
                 gNotifWithdrawn = NO;   // 1.32: 预览投递清除收起标志
                 // 1.9.163: 预览通知弹出时视频从头播放 (seek 0, 合法 CMTime)
                 if (gPlayer && gPlayerItem) {
@@ -2108,7 +2156,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.33");
+    ProbeWrite("LDD-BUILD v1.34");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2160,6 +2208,36 @@ static void LDDInit(void) {
                 ProbeWrite("BND-DONE-HOOK");
             } else {
                 ProbeWrite("BND-DONE-NOSAFE");
+            }
+            // 1.34: 补充收起变体 + 待呈现快照(编码精确匹配才挂, 防调用约定错位)
+            {
+                void *mF = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"));
+                const char *teF = mF ? method_getTypeEncoding(mF) : 0;
+                if (teF && strcmp(teF, "v@:c@cc") == 0) {
+                    MSHookMessageEx((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"), (IMP)HookBNDDismissOnlyForce, (IMP *)&origBNDDismissOnlyForce);
+                    ProbeWrite("BND-DFORCE-HOOK");
+                } else {
+                    char eb[96]; snprintf(eb, sizeof(eb), "BND-DFORCE-ENC-%.60s", teF ? teF : "nil");
+                    ProbeWrite(eb);
+                }
+                void *mR = class_getInstanceMethod((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"));
+                const char *teR = mR ? method_getTypeEncoding(mR) : 0;
+                if (teR && strcmp(teR, "v@:@@@") == 0) {
+                    MSHookMessageEx((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"), (IMP)HookBNDRevokeAll, (IMP *)&origBNDRevokeAll);
+                    ProbeWrite("BND-REVOKE-HOOK");
+                } else {
+                    char eb2[96]; snprintf(eb2, sizeof(eb2), "BND-REVOKE-ENC-%.60s", teR ? teR : "nil");
+                    ProbeWrite(eb2);
+                }
+                void *mS = class_getInstanceMethod((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"));
+                const char *teS = mS ? method_getTypeEncoding(mS) : 0;
+                if (teS && strcmp(teS, "v@:@") == 0) {
+                    MSHookMessageEx((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"), (IMP)HookBNDSetSnap, (IMP *)&origBNDSetSnap);
+                    ProbeWrite("BND-SNAP-HOOK");
+                } else {
+                    char eb3[96]; snprintf(eb3, sizeof(eb3), "BND-SNAP-ENC-%.60s", teS ? teS : "nil");
+                    ProbeWrite(eb3);
+                }
             }
         }
     }
