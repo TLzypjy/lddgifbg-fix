@@ -806,6 +806,25 @@ static BOOL gNotifWithdrawn = NO;   // 1.32: 收起钩子已触发(划掉/超时
 // 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
+// 1.33: 收起钩子内同步拆除当前背景 —— 用户要求"划掉通知背景立即消失"(不等轮询/布局周期)。
+// 收起钩子在主线程, 与布局同线程, 直接拆安全; 拆掉后收起动画中的宽岛布局会被收起标志压住,
+// 不会再重建背景(nActive 判定含 !gNotifWithdrawn)。
+static void LDDTeardownMediaNow(void) {
+    if (gContainerView) {
+        UIImageView *cvT = (UIImageView *)gContainerView;
+        [cvT stopAnimating];
+        [cvT setImage:nil];
+        [cvT setAnimationImages:nil];
+        [cvT removeFromSuperview];
+        gContainerView = nil;
+        gContentView = nil;
+    }
+    StopVideo();
+    StreamPause();
+    gStreamStopTs = CFAbsoluteTimeGetCurrent();
+    gVideoStopTs = CFAbsoluteTimeGetCurrent();
+    ProbeWrite("TEARDOWN-NOW");
+}
 // 1.5: 通知横幅容器识别 —— 沿 superview 链找类名含 Banner/Notification 的视图
 // 场景: banner destination 复用时 init 不再触发, gNotifActive 未激活, 通知收起窄条靠此立即显示 (解决新通知背景延迟~1s)
 // 1.6: 0.15s 结果缓存 (窄条判定不每帧扫链, 降低 CPU)
@@ -911,6 +930,7 @@ static void HookBNDWithdraw(id self, SEL _c, id req) {
     gNotifActive = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    LDDTeardownMediaNow();   // 1.33: 划掉的当帧同步拆背景
     ProbeWrite("BND-WITHDRAW-CLEAR");
 }
 static void (*origBNDDismiss)(id, SEL, BOOL, id, BOOL);
@@ -919,6 +939,7 @@ static void HookBNDDismiss(id self, SEL _c, BOOL a, id r, BOOL f) {
     gNotifActive = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISS-CLEAR");
 }
 static void (*origBNDDismissOnly)(id, SEL, BOOL, id, BOOL);
@@ -927,6 +948,7 @@ static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     gNotifActive = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISSONLY-CLEAR");
 }
 // 1.29: 复用 destination 的呈现/收起信号 —— 实机日志证实 destination 常驻复用(每次开机仅 1 次 init),
@@ -1259,7 +1281,9 @@ static void LDDIslandLayout(id self) {
                 }
                 presenting = gPollR;
             }
-            BOOL nActive = presenting || (gNotifActive && ((nowT - gNotifTs) < 15.0));
+            // 1.33: 收起标志直接参与判定 —— 钩子置位后(同帧起)任何布局都不再重建背景,
+            // 不等 0.1s 轮询缓存回落; 收起钩子本身已同步拆掉背景(TEARDOWN-NOW)
+            BOOL nActive = (presenting && !gNotifWithdrawn) || (gNotifActive && ((nowT - gNotifTs) < 15.0));
             dbgNA = nActive;
             // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
             // 与通知横幅尺寸完全重叠, 且同样触发布局层保活刷新 gNotifTs -> 1.9.204 的 nActive 门被击穿
@@ -2084,7 +2108,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.32");
+    ProbeWrite("LDD-BUILD v1.33");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
