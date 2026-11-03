@@ -805,6 +805,10 @@ static BOOL gNotifSession = NO;     // 1.34: 通知会话中(nil->非nil 转换�
                                     // 实机证实 presentedPresentableVC 每次查询可能返回新包装对象(指针
                                     // 持续变化), 早划后还持旧 VC 至原生命周期(~8s) —— 指针追踪不可用;
                                     // 只有"上一轮为 nil"才允许开启会话, 收起后的持续非 nil 不会重新铺背景
+static double gCloseBlockUntil = 0; // 1.35: 收起钩子后的自动重开屏蔽期(9s ≈ 横幅生命周期) ——
+                                    // 实机证实上划后系统会把通知以药丸形式重新上岛(呈现层经历
+                                    // 清空->非空), 会话被重开导致背景重新铺回; 屏蔽期内 nil->非nil
+                                    // 不自动开会话, 真正的新通知由 setPresentablePendingSnapshot: 钩子补获
 // 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
@@ -826,6 +830,17 @@ static void LDDTeardownMediaNow(void) {
     gStreamStopTs = CFAbsoluteTimeGetCurrent();
     gVideoStopTs = CFAbsoluteTimeGetCurrent();
     ProbeWrite("TEARDOWN-NOW");
+}
+// 1.35: 归一化 type encoding —— 本机编码为带偏移全量格式("v24@0:8@16"), 简写精确匹配全部落空。
+// 去掉偏移数字后比对参数序列: "v36@0:8B16@20B28B32" -> "v@:B@BB"
+static void LDDParseEnc(const char *te, char *out, int outLen) {
+    int o = 0;
+    if (!te) { if (outLen > 0) out[0] = 0; return; }
+    for (const char *p = te; *p && o < outLen - 1; p++) {
+        if (*p >= '0' && *p <= '9') continue;
+        out[o++] = *p;
+    }
+    out[o] = 0;
 }
 // 1.5: 通知横幅容器识别 —— 沿 superview 链找类名含 Banner/Notification 的视图
 // 场景: banner destination 复用时 init 不再触发, gNotifActive 未激活, 通知收起窄条靠此立即显示 (解决新通知背景延迟~1s)
@@ -933,6 +948,7 @@ static void HookBNDWithdraw(id self, SEL _c, id req) {
     gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gCloseBlockUntil = gNotifTs + 9.0;   // 1.35: 屏蔽自动重开(药丸重新上岛), 新通知走快照钩子补获
     LDDTeardownMediaNow();   // 1.33: 划掉的当帧同步拆背景
     ProbeWrite("BND-WITHDRAW-CLEAR");
 }
@@ -943,6 +959,7 @@ static void HookBNDDismiss(id self, SEL _c, BOOL a, id r, BOOL f) {
     gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gCloseBlockUntil = gNotifTs + 9.0;
     LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISS-CLEAR");
 }
@@ -953,6 +970,7 @@ static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gCloseBlockUntil = gNotifTs + 9.0;
     LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISSONLY-CLEAR");
 }
@@ -965,18 +983,22 @@ static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL 
     gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gCloseBlockUntil = gNotifTs + 9.0;
     LDDTeardownMediaNow();
     ProbeWrite("BND-DFORCE-CLEAR");
 }
 static void (*origBNDRevokeAll)(id, SEL, id, id, id);
-static void HookBNDRevokeAll(id self, SEL _c, id a, id b, id c) {
-    if (origBNDRevokeAll) origBNDRevokeAll(self, _c, a, b, c);
+static BOOL HookBNDRevokeAll(id self, SEL _c, id a, id b, id c) {
+    // 实机编码 B40@0:8@16@24Q32 = 返回 BOOL, 参数(id,id,NSUInteger) —— 必须回传原返回值
+    BOOL r = origBNDRevokeAll ? origBNDRevokeAll(self, _c, a, b, c) : NO;
     gNotifActive = NO;
     gNotifSession = NO;
     gNotifWithdrawn = YES;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gCloseBlockUntil = gNotifTs + 9.0;
     LDDTeardownMediaNow();
     ProbeWrite("BND-REVOKE-CLEAR");
+    return r;
 }
 // 1.34: 待呈现快照 setter —— 收起后 8s 内连发的新通知补获信号(PVC 未经历 nil 转换时
 // 轮询无法发现新横幅)。仅当呈现层当前确实持有横幅时才开启会话, 防 Post 阶段误开。
@@ -1313,15 +1335,23 @@ static void LDDIslandLayout(id self) {
                     gPollR = NO;
                     if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
                         id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
+                        double nowBlk = CFAbsoluteTimeGetCurrent();
                         if (!pvc) {
                             gPrevNil = YES;
                             gNotifSession = NO;
-                        } else if (gPrevNil) {
+                        } else if (gPrevNil && nowBlk >= gCloseBlockUntil) {
+                            // 屏蔽期外的 nil->非nil 转换 = 新横幅上岛
                             gNotifSession = YES;
                             gNotifWithdrawn = NO;
                             gPrevNil = NO;
                             static int newlog = 0;
                             if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
+                        } else if (!gNotifSession && !gPrevNil && nowBlk >= gCloseBlockUntil) {
+                            // 屏蔽期结束后 PVC 仍非空(新横幅未被快照钩子捕获)兜底开启
+                            gNotifSession = YES;
+                            gNotifWithdrawn = NO;
+                            static int rslog = 0;
+                            if (rslog < 30) { rslog++; ProbeWrite("POLL-SESSION-RESUME"); }
                         }
                         gPollR = gNotifSession;
                         static int polllog = 0;
@@ -2156,7 +2186,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.34");
+    ProbeWrite("LDD-BUILD v1.35");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2191,53 +2221,55 @@ static void LDDInit(void) {
         if (class_getInstanceMethod((Class)clsBND, sO))
             MSHookMessageEx((Class)clsBND, sO, (IMP)HookBNDDismissOnly, (IMP *)&origBNDDismissOnly);
         ProbeWrite("BND-CLOSE-HOOKS-OK");
-        // 1.29: 通知呈现/收起生命周期钩子(方法存在且签名为 v@:@ 才挂, 防调用约定错位)
+        // 1.35: 生命周期钩子 —— 编码经 LDDParseEnc 归一化后精确匹配
+        // (本机为带偏移全量格式 "v24@0:8@16", 1.34 的简写精确匹配全部落空导致钩子没装上)
         {
+            char pe[64];
             void *mSP = class_getInstanceMethod((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"));
-            const char *teSP = mSP ? method_getTypeEncoding(mSP) : 0;
-            if (teSP && teSP[0] == 'v' && teSP[1] == '@' && teSP[2] == ':' && teSP[3] == '@' && teSP[4] == '\0') {
+            LDDParseEnc(mSP ? method_getTypeEncoding(mSP) : 0, pe, sizeof(pe));
+            if (strcmp(pe, "v@:@") == 0) {
                 MSHookMessageEx((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"), (IMP)HookBNDSetPresented, (IMP *)&origBNDSetPresented);
                 ProbeWrite("BND-PRESENT-HOOK");
             } else {
-                ProbeWrite("BND-PRESENT-NOSAFE");
+                char eb[96]; snprintf(eb, sizeof(eb), "BND-PRESENT-ENC-%.60s", pe);
+                ProbeWrite(eb);
             }
             void *mDC = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissBannerCompleted:"));
-            const char *teDC = mDC ? method_getTypeEncoding(mDC) : 0;
-            if (teDC && teDC[0] == 'v' && teDC[1] == '@' && teDC[2] == ':' && teDC[3] == '@' && teDC[4] == '\0') {
+            LDDParseEnc(mDC ? method_getTypeEncoding(mDC) : 0, pe, sizeof(pe));
+            if (strcmp(pe, "v@:@") == 0) {
                 MSHookMessageEx((Class)clsBND, sel_registerName("_dismissBannerCompleted:"), (IMP)HookBNDDismissCompleted, (IMP *)&origBNDDismissCompleted);
                 ProbeWrite("BND-DONE-HOOK");
             } else {
-                ProbeWrite("BND-DONE-NOSAFE");
+                char eb2[96]; snprintf(eb2, sizeof(eb2), "BND-DONE-ENC-%.60s", pe);
+                ProbeWrite(eb2);
             }
-            // 1.34: 补充收起变体 + 待呈现快照(编码精确匹配才挂, 防调用约定错位)
-            {
-                void *mF = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"));
-                const char *teF = mF ? method_getTypeEncoding(mF) : 0;
-                if (teF && strcmp(teF, "v@:c@cc") == 0) {
-                    MSHookMessageEx((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"), (IMP)HookBNDDismissOnlyForce, (IMP *)&origBNDDismissOnlyForce);
-                    ProbeWrite("BND-DFORCE-HOOK");
-                } else {
-                    char eb[96]; snprintf(eb, sizeof(eb), "BND-DFORCE-ENC-%.60s", teF ? teF : "nil");
-                    ProbeWrite(eb);
-                }
-                void *mR = class_getInstanceMethod((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"));
-                const char *teR = mR ? method_getTypeEncoding(mR) : 0;
-                if (teR && strcmp(teR, "v@:@@@") == 0) {
-                    MSHookMessageEx((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"), (IMP)HookBNDRevokeAll, (IMP *)&origBNDRevokeAll);
-                    ProbeWrite("BND-REVOKE-HOOK");
-                } else {
-                    char eb2[96]; snprintf(eb2, sizeof(eb2), "BND-REVOKE-ENC-%.60s", teR ? teR : "nil");
-                    ProbeWrite(eb2);
-                }
-                void *mS = class_getInstanceMethod((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"));
-                const char *teS = mS ? method_getTypeEncoding(mS) : 0;
-                if (teS && strcmp(teS, "v@:@") == 0) {
-                    MSHookMessageEx((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"), (IMP)HookBNDSetSnap, (IMP *)&origBNDSetSnap);
-                    ProbeWrite("BND-SNAP-HOOK");
-                } else {
-                    char eb3[96]; snprintf(eb3, sizeof(eb3), "BND-SNAP-ENC-%.60s", teS ? teS : "nil");
-                    ProbeWrite(eb3);
-                }
+            // 1.35: 补充收起变体 + 待呈现快照(实机编码: dforce=v@:B@BB, revoke=B@:@@Q, snap=v@:@)
+            void *mF = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"));
+            LDDParseEnc(mF ? method_getTypeEncoding(mF) : 0, pe, sizeof(pe));
+            if (strcmp(pe, "v@:B@BB") == 0) {
+                MSHookMessageEx((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"), (IMP)HookBNDDismissOnlyForce, (IMP *)&origBNDDismissOnlyForce);
+                ProbeWrite("BND-DFORCE-HOOK");
+            } else {
+                char eb3[96]; snprintf(eb3, sizeof(eb3), "BND-DFORCE-ENC-%.60s", pe);
+                ProbeWrite(eb3);
+            }
+            void *mR = class_getInstanceMethod((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"));
+            LDDParseEnc(mR ? method_getTypeEncoding(mR) : 0, pe, sizeof(pe));
+            if (strcmp(pe, "B@:@@Q") == 0) {
+                MSHookMessageEx((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"), (IMP)HookBNDRevokeAll, (IMP *)&origBNDRevokeAll);
+                ProbeWrite("BND-REVOKE-HOOK");
+            } else {
+                char eb4[96]; snprintf(eb4, sizeof(eb4), "BND-REVOKE-ENC-%.60s", pe);
+                ProbeWrite(eb4);
+            }
+            void *mS = class_getInstanceMethod((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"));
+            LDDParseEnc(mS ? method_getTypeEncoding(mS) : 0, pe, sizeof(pe));
+            if (strcmp(pe, "v@:@") == 0) {
+                MSHookMessageEx((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"), (IMP)HookBNDSetSnap, (IMP *)&origBNDSetSnap);
+                ProbeWrite("BND-SNAP-HOOK");
+            } else {
+                char eb5[96]; snprintf(eb5, sizeof(eb5), "BND-SNAP-ENC-%.60s", pe);
+                ProbeWrite(eb5);
             }
         }
     }
