@@ -61,7 +61,6 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 - (NSUInteger)length;
 + (id)stringWithContentsOfFile:(NSString *)path encoding:(NSUInteger)enc error:(id *)err;
 - (NSArray *)componentsSeparatedByString:(NSString *)sep;
-- (NSString *)componentsJoinedByString:(NSString *)sep;
 - (NSString *)stringByTrimmingCharactersInSet:(id)cs;
 @end
 @interface NSArray : NSObject
@@ -73,6 +72,7 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 - (id)mutableCopy;
 - (NSUInteger)countByEnumeratingWithState:(void *)state objects:(id *)buf count:(NSUInteger)len;
 - (id)objectAtIndexedSubscript:(NSUInteger)i;
+- (NSString *)componentsJoinedByString:(NSString *)sep;
 @end
 @interface NSMutableArray : NSArray
 + (id)array;
