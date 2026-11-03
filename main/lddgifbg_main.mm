@@ -1010,6 +1010,25 @@ static void HookBNDInteractEnd(id self, SEL _c, id vc) {
         ProbeWrite("BND-INTERACT-END");
     }
 }
+// 1.39: 横幅呈现尺寸回调 —— 区分"新横幅"与"划掉后重新上岛的药丸"的可靠信号:
+// 新通知以展开尺寸(≥250x40)呈现, 药丸永远是紧凑尺寸, 且本回调只在通知横幅上触发
+// (音乐/直播 Live Activity 不走 SBNotificationBannerDestination)。
+// 展开尺寸呈现 = 新横幅上岛 -> 无视划掉屏蔽期立即开会话铺背景; 紧凑尺寸 = 药丸 -> 忽略。
+// 会话已开启时重复触发为无操作(同一条横幅的尺寸更新)。编码宽松校验(v@:@ + 带 CGSize 结构)防崩。
+static void (*origBNDPresSize)(id, SEL, id, CGSize, CGSize);
+static void HookBNDPresSize(id self, SEL _c, id vc, CGSize psz, CGSize csz) {
+    if (origBNDPresSize) origBNDPresSize(self, _c, vc, psz, csz);
+    if (vc && psz.width >= 250.0 && psz.height >= 40.0 && !gNotifSession) {
+        gNotifSession = YES;
+        gNotifWithdrawn = NO;
+        gNotifActive = YES;
+        gNotifTs = CFAbsoluteTimeGetCurrent();
+        gNotifPresentTs = gNotifTs;
+        gSawWideInSession = NO;
+        static int pslog = 0;
+        if (pslog < 30) { pslog++; ProbeWrite("BND-PRESIZE-ARM"); }
+    }
+}
 // 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
@@ -2186,7 +2205,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.38");
+    ProbeWrite("LDD-BUILD v1.39");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2243,6 +2262,17 @@ static void LDDInit(void) {
             } else {
                 char eb6[96]; snprintf(eb6, sizeof(eb6), "BND-INTERACT-ENC-%.60s", pe);
                 ProbeWrite(eb6);
+            }
+            // 1.39: 呈现尺寸回调(宽松校验: 返回 v + self/cmd + id + 两个 CGSize 结构) ——
+            // 展开尺寸呈现 = 新横幅(无视划掉屏蔽期立即铺背景), 紧凑 = 药丸(忽略)
+            void *mPS = class_getInstanceMethod((Class)clsBND, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
+            LDDParseEnc(mPS ? method_getTypeEncoding(mPS) : 0, pe, sizeof(pe));
+            if (strncmp(pe, "v@:@", 4) == 0 && strstr(pe, "CGSize") != 0) {
+                MSHookMessageEx((Class)clsBND, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"), (IMP)HookBNDPresSize, (IMP *)&origBNDPresSize);
+                ProbeWrite("BND-PRESIZE-HOOK");
+            } else {
+                char eb7[96]; snprintf(eb7, sizeof(eb7), "BND-PRESIZE-ENC-%.60s", pe);
+                ProbeWrite(eb7);
             }
         }
     }
