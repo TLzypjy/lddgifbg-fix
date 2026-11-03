@@ -39,6 +39,7 @@ extern "C" int objc_getClassList(void *buffer, int bufferLen);
 extern "C" const char *class_getName(void *cls);
 extern "C" void *class_copyMethodList(Class cls, unsigned int *count);
 extern "C" void *method_getName(void *method);
+extern "C" const char *method_getTypeEncoding(void *method);
 extern "C" const char *sel_getName(void *sel);
 extern "C" void *objc_autoreleasePoolPush(void);
 extern "C" void objc_autoreleasePoolPop(void *pool);
@@ -922,6 +923,31 @@ static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     gNotifTs = CFAbsoluteTimeGetCurrent();
     ProbeWrite("BND-DISMISSONLY-CLEAR");
 }
+// 1.29: 复用 destination 的呈现/收起信号 —— 实机日志证实 destination 常驻复用(每次开机仅 1 次 init),
+// 后续通知不再触发 init; 旧"布局保活"刷新 gNotifTs 成了"任何宽岛都算通知活跃"的毒源
+// (听歌展开条 407x92/285x52 被永久误铺)。_setPresentedPresentableVC: / _dismissBannerCompleted:
+// 在本机 CLOSE-METHOD 枚举中确认存在, 每次真实呈现/收起都会走 —— 以此作为通知生命周期信号。
+// 挂接前校验方法编码必须是 v@:@(单 id 参数), 签名不符不挂, 防止调用约定错位崩溃。
+static void (*origBNDSetPresented)(id, SEL, id);
+static void HookBNDSetPresented(id self, SEL _c, id vc) {
+    if (origBNDSetPresented) origBNDSetPresented(self, _c, vc);
+    if (vc) {
+        gNotifActive = YES;
+        gNotifTs = CFAbsoluteTimeGetCurrent();
+        ProbeWrite("BND-PRESENT-SET");
+    } else {
+        gNotifActive = NO;
+        gNotifTs = CFAbsoluteTimeGetCurrent();
+        ProbeWrite("BND-PRESENT-CLEAR");
+    }
+}
+static void (*origBNDDismissCompleted)(id, SEL, id);
+static void HookBNDDismissCompleted(id self, SEL _c, id vc) {
+    if (origBNDDismissCompleted) origBNDDismissCompleted(self, _c, vc);
+    gNotifActive = NO;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    ProbeWrite("BND-PRESENT-DONE");
+}
 // 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
@@ -1175,6 +1201,14 @@ static void LDDIslandLayout(id self) {
                     char cl[64];
                     snprintf(cl, sizeof(cl), "CAP-DETECT-%d-rp%d-w%.0f-h%.0f", cap ? 1 : 0, rpRec ? 1 : 0, b0.w, b0.h);
                     ProbeWrite(cl);
+                    // 1.29: 岛内位置探针 —— 录屏指示条与听歌条同尺寸同链, 采集 self 在容器内的
+                    // 偏移, 为下一版按左右位置区分做数据准备
+                    CGRect sf = ((CGRect(*)(id, SEL))objc_msgSend)(self, sel_registerName("frame"));
+                    id sp2 = ((id(*)(id, SEL))objc_msgSend)((id)self, sel_registerName("superview"));
+                    CGRect pf2 = sp2 ? ((CGRect(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
+                    char pfl[160];
+                    snprintf(pfl, sizeof(pfl), "CAP-FRAME self-x%.0f-y%.0f supx%.0f w%.0f h%.0f", sf.ox, sf.oy, pf2.ox, b0.w, b0.h);
+                    ProbeWrite(pfl);
                 }
             }
             BOOL capAll = (gCapC || gCapR);
@@ -1184,7 +1218,10 @@ static void LDDIslandLayout(id self) {
             // 导致小岛关时听歌/直播窄条在通知后 30s 内误铺背景(时有时无)。
             //   nActive = 横幅在岛/刚离岛 2 秒内, 由三处刷新: ① BND init(新 destination)
             //   ② 关闭钩子(划走/超时收起, 留 2s 收起动画宽限) ③ 布局层保活(下方, 横幅形态容器即刷新)
-            BOOL nActive = (nowT - gNotifTs) < 2.0;
+            // 1.29: 通知活跃窗口改双段 —— 呈现中(生命周期钩子 BND-PRESENT-SET 置位)最长 15s 硬顶
+            // (横幅自动收起钩子万一漏触发也不至于永久活跃); 已收起只留 2s 收起动画宽限。
+            // 旧版单段 2s 靠"布局保活"续命, 而保活对任何 >=250 宽的岛都刷新 —— 听歌展开条被永久续满窗口。
+            BOOL nActive = gNotifActive ? ((nowT - gNotifTs) < 15.0) : ((nowT - gNotifTs) < 2.0);
             dbgNA = nActive;
             // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
             // 与通知横幅尺寸完全重叠, 且同样触发布局层保活刷新 gNotifTs -> 1.9.204 的 nActive 门被击穿
@@ -1205,12 +1242,10 @@ static void LDDIslandLayout(id self) {
                 seCur = ((id(*)(id, SEL))objc_msgSend)(seCur, sel_registerName("superview"));
                 seDepth++;
             }
-            // 布局层保活: 看到横幅形态容器(通知展开/重弹中间态, 宽>=250 高>=40)就刷新窗口,
-            // 不依赖 BND init —— 实机通知复用 destination 不触发 init, 靠它让真实通知的收起/中间态命中
-            // 1.9.206: 加 !seHit 门 —— Live Activity 展开条不再刷新通知窗口, nA 自然回落到 0
-            if (!seHit && b0.w >= 250.0 && b0.h >= 40.0) {
-                gNotifTs = nowT;
-            }
+            // 1.29: 移除"布局层保活"(看到 >=250x40 的容器就刷新 gNotifTs)。
+            // 实机日志证实: 听歌展开条(407x92)与通知横幅同尺寸, 保活把通知窗口永久续满,
+            // 是"小岛关时听歌岛被铺背景"的直接根因; 通知在岛/离岛改由 _setPresentedPresentableVC:
+            // 与 _dismissBannerCompleted: 生命周期钩子精确驱动(对本机常驻复用的 destination 同样有效)。
             const char *clsNow = object_getClassName(self);
             int faceidC = (clsNow && strstr(clsNow, "ScenePresenterView"));
             if (faceidC) {
@@ -1262,13 +1297,17 @@ static void LDDIslandLayout(id self) {
                         recDepth++;
                     }
                 }
-                if (!seHit || recHit) {
+                // 1.29: 录屏中只铺宽条(录屏开始的"屏幕录制"展开横幅)与链上有明确录屏类的岛。
+                // 实机证实紧凑录屏条(129x38/176x37)与听歌条同尺寸同视图链, 无法盲区分 ——
+                // 紧凑条不再因"正在录屏"一律铺(1.9.203 教训: 听歌+录屏时听歌条被误铺);
+                // CAP-FRAME 探针采集岛内位置数据, 下一版按左右位置精确区分。
+                if (recHit || (b0.w >= 250.0 && b0.h >= 40.0)) {
                     show = YES;
                     static int reclog3 = 0;
                     if (reclog3 < 40) { reclog3++; char rb[96]; snprintf(rb, sizeof(rb), "REC-CAPTURED-ON-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb); }
                 } else {
                     static int recsk = 0;
-                    if (recsk < 40) { recsk++; char rb2[96]; snprintf(rb2, sizeof(rb2), "REC-SKIP-LIVEACT-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb2); }
+                    if (recsk < 40) { recsk++; char rb2[96]; snprintf(rb2, sizeof(rb2), "REC-SKIP-COMPACT-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb2); }
                 }
             } else {
                 // 听歌/直播(展开/紧凑)及其他岛: 小岛关一律不铺
@@ -2034,7 +2073,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD actions-1.9.145-merge");
+    ProbeWrite("LDD-BUILD v1.29");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2069,6 +2108,25 @@ static void LDDInit(void) {
         if (class_getInstanceMethod((Class)clsBND, sO))
             MSHookMessageEx((Class)clsBND, sO, (IMP)HookBNDDismissOnly, (IMP *)&origBNDDismissOnly);
         ProbeWrite("BND-CLOSE-HOOKS-OK");
+        // 1.29: 通知呈现/收起生命周期钩子(方法存在且签名为 v@:@ 才挂, 防调用约定错位)
+        {
+            void *mSP = class_getInstanceMethod((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"));
+            const char *teSP = mSP ? method_getTypeEncoding(mSP) : 0;
+            if (teSP && teSP[0] == 'v' && teSP[1] == '@' && teSP[2] == ':' && teSP[3] == '@' && teSP[4] == '\0') {
+                MSHookMessageEx((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"), (IMP)HookBNDSetPresented, (IMP *)&origBNDSetPresented);
+                ProbeWrite("BND-PRESENT-HOOK");
+            } else {
+                ProbeWrite("BND-PRESENT-NOSAFE");
+            }
+            void *mDC = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissBannerCompleted:"));
+            const char *teDC = mDC ? method_getTypeEncoding(mDC) : 0;
+            if (teDC && teDC[0] == 'v' && teDC[1] == '@' && teDC[2] == ':' && teDC[3] == '@' && teDC[4] == '\0') {
+                MSHookMessageEx((Class)clsBND, sel_registerName("_dismissBannerCompleted:"), (IMP)HookBNDDismissCompleted, (IMP *)&origBNDDismissCompleted);
+                ProbeWrite("BND-DONE-HOOK");
+            } else {
+                ProbeWrite("BND-DONE-NOSAFE");
+            }
+        }
     }
     // Darwin notify: 设置端点"预览通知"即时触发 (灵动通知同款机制)
     static int notifyTok = 0;
