@@ -1029,6 +1029,35 @@ static void HookBNDPresSize(id self, SEL _c, id vc, CGSize psz, CGSize csz) {
         if (pslog < 30) { pslog++; ProbeWrite("BND-PRESIZE-ARM"); }
     }
 }
+// 1.40: SBBannerManager 新横幅创建回调 —— v1.39 的呈现尺寸回调在本机不随呈现调用(ARM=0)。
+// bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:... 在每条
+// "新通知"创建可呈现对象时触发一次; 划掉后旧通知的药丸重新上岛复用已有对象, 不再触发。
+// 因此它是"真·新通知"的可靠信号: 触发即开会话铺背景(无视划掉屏蔽期)。签名归一校验防崩。
+static void (*origBNDNewBannerV)(id, SEL, id, id, id, id);
+static void HookBNDNewBannerV(id self, SEL _c, id a, id b, id c, id d) {
+    if (origBNDNewBannerV) origBNDNewBannerV(self, _c, a, b, c, d);
+    gNotifSession = YES;
+    gNotifWithdrawn = NO;
+    gNotifActive = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    gNotifPresentTs = gNotifTs;
+    gSawWideInSession = NO;
+    static int nblog = 0;
+    if (nblog < 40) { nblog++; ProbeWrite("BND-NEWBANNER-ARM"); }
+}
+static id (*origBNDNewBannerI)(id, SEL, id, id, id, id);
+static id HookBNDNewBannerI(id self, SEL _c, id a, id b, id c, id d) {
+    id r = origBNDNewBannerI ? origBNDNewBannerI(self, _c, a, b, c, d) : nil;
+    gNotifSession = YES;
+    gNotifWithdrawn = NO;
+    gNotifActive = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    gNotifPresentTs = gNotifTs;
+    gSawWideInSession = NO;
+    static int nbilog = 0;
+    if (nbilog < 40) { nbilog++; ProbeWrite("BND-NEWBANNER-ARM-I"); }
+    return r;
+}
 // 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
@@ -2205,7 +2234,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.39");
+    ProbeWrite("LDD-BUILD v1.40");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2273,6 +2302,28 @@ static void LDDInit(void) {
             } else {
                 char eb7[96]; snprintf(eb7, sizeof(eb7), "BND-PRESIZE-ENC-%.60s", pe);
                 ProbeWrite(eb7);
+            }
+            // 1.40: SBBannerManager 新横幅创建回调 —— 每"新通知"触发一次(药丸重新上岛不触发),
+            // 触发即开会话铺背景(无视划掉屏蔽期)。返回类型两种形态都支持。
+            {
+                id clsBM = objc_getClass("SBBannerManager");
+                if (clsBM) {
+                    void *mNB = class_getInstanceMethod((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"));
+                    char pe2[64];
+                    LDDParseEnc(mNB ? method_getTypeEncoding(mNB) : 0, pe2, sizeof(pe2));
+                    if (strcmp(pe2, "v@:@@@@") == 0 || strcmp(pe2, "v@:@@@@@") == 0) {
+                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerV, (IMP *)&origBNDNewBannerV);
+                        ProbeWrite("BND-NEWBANNER-HOOK-V");
+                    } else if (strcmp(pe2, "@@:@@@@") == 0 || strcmp(pe2, "@@:@@@@@") == 0) {
+                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI, (IMP *)&origBNDNewBannerI);
+                        ProbeWrite("BND-NEWBANNER-HOOK-I");
+                    } else {
+                        char eb8[96]; snprintf(eb8, sizeof(eb8), "BND-NEWBANNER-ENC-%.60s", pe2);
+                        ProbeWrite(eb8);
+                    }
+                } else {
+                    ProbeWrite("BND-NEWBANNER-NOCLS");
+                }
             }
         }
     }
