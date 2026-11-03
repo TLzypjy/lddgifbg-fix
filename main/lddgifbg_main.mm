@@ -800,6 +800,7 @@ static void LogReason(const char *tag, id e) {
 static id gPresentLayer = nil;
 static double gNotifTs = -9999.0;   // 1.9.179: 最近通知横幅呈现时间(CFAbsoluteTimeGetCurrent)
 static BOOL gNotifActive = NO;      // 1.9.181: 通知横幅活跃标志(init置YES, 自动关闭置NO)
+static double gIdleOverrideUntil = 0; // 1.31: 收起钩子触发后的强制空闲截止时间(零宽限, 划掉即清背景)
 // 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
@@ -907,6 +908,9 @@ static void HookBNDWithdraw(id self, SEL _c, id req) {
     if (origBNDWithdraw) origBNDWithdraw(self, _c, req);
     gNotifActive = NO;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    // 1.31: 零宽限 —— 收起瞬间起 1s 内强制视为无横幅(呈现层仍短暂持有旧 VC, 实机 POLL 序列
+    // 证实约 0.5~1s 才回落), 用户要求"划掉通知背景立马消失"; 新呈现会在 SetPresented 中取消强制
+    gIdleOverrideUntil = gNotifTs + 1.0;
     ProbeWrite("BND-WITHDRAW-CLEAR");
 }
 static void (*origBNDDismiss)(id, SEL, BOOL, id, BOOL);
@@ -914,6 +918,7 @@ static void HookBNDDismiss(id self, SEL _c, BOOL a, id r, BOOL f) {
     if (origBNDDismiss) origBNDDismiss(self, _c, a, r, f);
     gNotifActive = NO;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gIdleOverrideUntil = gNotifTs + 1.0;
     ProbeWrite("BND-DISMISS-CLEAR");
 }
 static void (*origBNDDismissOnly)(id, SEL, BOOL, id, BOOL);
@@ -921,6 +926,7 @@ static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     if (origBNDDismissOnly) origBNDDismissOnly(self, _c, a, r, f);
     gNotifActive = NO;
     gNotifTs = CFAbsoluteTimeGetCurrent();
+    gIdleOverrideUntil = gNotifTs + 1.0;
     ProbeWrite("BND-DISMISSONLY-CLEAR");
 }
 // 1.29: 复用 destination 的呈现/收起信号 —— 实机日志证实 destination 常驻复用(每次开机仅 1 次 init),
@@ -934,6 +940,7 @@ static void HookBNDSetPresented(id self, SEL _c, id vc) {
     if (vc) {
         gNotifActive = YES;
         gNotifTs = CFAbsoluteTimeGetCurrent();
+        gIdleOverrideUntil = 0;   // 1.31: 新呈现取消强制空闲, 收起后立刻再来的通知立即铺背景
         ProbeWrite("BND-PRESENT-SET");
     } else {
         gNotifActive = NO;
@@ -1220,18 +1227,19 @@ static void LDDIslandLayout(id self) {
             // 导致小岛关时听歌/直播窄条在通知后 30s 内误铺背景(时有时无)。
             //   nActive = 横幅在岛/刚离岛 2 秒内, 由三处刷新: ① BND init(新 destination)
             //   ② 关闭钩子(划走/超时收起, 留 2s 收起动画宽限) ③ 布局层保活(下方, 横幅形态容器即刷新)
-            // 1.30: 通知活跃 = 三路信号取或 ——
-            //   ① 实时轮询呈现层 presentedPresentableVC(非 nil 即有横幅在岛, 对复用 destination 有效;
-            //      1.29 实机证实 _setPresentedPresentableVC: 在 iOS16.1 呈现路径不会被调用, 钩子信号落空)
-            //   ② BND init 后 15s 内(开机首条通知兜底)
-            //   ③ 收起钩子后 2s 收起动画宽限
+            // 1.31: 通知活跃 = 零宽限判定 ——
+            //   ① 实时轮询呈现层 presentedPresentableVC(0.1s 缓存; 非 nil 即有横幅在岛)
+            //   ② 收起钩子(withdraw/dismiss)触发后 1s 内强制视为无横幅 —— 收起后呈现层仍短暂
+            //      持有旧 VC(实机 POLL 序列证实约 0.5~1s 回落), 用户要求"划掉通知背景立马消失";
+            //      新呈现(BND-PRESENT-SET/RN 投递)会取消强制, 收起后立刻再来的通知不受影响
+            //   ③ BND init 后 15s 内兜底(开机首条通知)
             BOOL presenting = NO;
-            {
+            double nowQ = CFAbsoluteTimeGetCurrent();
+            if (nowQ >= gIdleOverrideUntil) {
                 static double gPollT = 0;
                 static BOOL gPollR = NO;
-                double nwP = CFAbsoluteTimeGetCurrent();
-                if (nwP - gPollT >= 0.2) {
-                    gPollT = nwP;
+                if (nowQ - gPollT >= 0.1) {
+                    gPollT = nowQ;
                     gPollR = NO;
                     if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
                         id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
@@ -1242,9 +1250,7 @@ static void LDDIslandLayout(id self) {
                 }
                 presenting = gPollR;
             }
-            BOOL nActive = presenting
-                         || (gNotifActive && ((nowT - gNotifTs) < 15.0))
-                         || (!gNotifActive && ((nowT - gNotifTs) < 2.0));
+            BOOL nActive = presenting || (gNotifActive && ((nowT - gNotifTs) < 15.0));
             dbgNA = nActive;
             // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
             // 与通知横幅尺寸完全重叠, 且同样触发布局层保活刷新 gNotifTs -> 1.9.204 的 nActive 门被击穿
@@ -2049,6 +2055,7 @@ static void PostRealNotification(void) {
                 // 1.9.183: 预览通知呈现成功 -> 通知活跃生命周期绑定 RN 流程 (返回桌面收起/重弹全程显示, 不依赖 BND init)
                 gNotifTs = CFAbsoluteTimeGetCurrent();
                 gNotifActive = YES;
+                gIdleOverrideUntil = 0;   // 1.31: 预览投递取消强制空闲
                 // 1.9.163: 预览通知弹出时视频从头播放 (seek 0, 合法 CMTime)
                 if (gPlayer && gPlayerItem) {
                     typedef id (*Fn)(id, SEL, struct CMTimeRaw);
@@ -2068,7 +2075,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.30");
+    ProbeWrite("LDD-BUILD v1.31");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
