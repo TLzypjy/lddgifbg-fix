@@ -974,8 +974,12 @@ static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
     LDDTeardownMediaNow();
     ProbeWrite("BND-DISMISSONLY-CLEAR");
 }
-// 1.34: 补充收起变体与撤销入口(存在且签名精确匹配才挂, 防调用约定错位) —— 部分系统路径
-// 从这些方法收起横幅, 漏挂会让会话不结束、背景滞留。
+// 1.34: 补充收起变体(存在且签名精确匹配才挂, 防调用约定错位)。
+// 1.36: 实机崩溃定位 —— 收起链条中系统回调 Revoke/SetPresented/DismissCompleted/SetSnap
+// 四个钩子时 ARC retain 到垃圾指针(SIGSEGV, 崩溃栈: objc_retain<-插件<-系统 Only3<-插件<-系统 dforce),
+// 四钩全部移除; 只保留编码实测验证过的 dismiss 系钩子。
+// 新增 userInteractionDidEndForBannerForPresentable:(触摸结束)—— 手指离屏瞬间拆背景,
+// 早于系统收起流程, 消除"划掉后背景停留约一秒"。
 static void (*origBNDDismissOnlyForce)(id, SEL, BOOL, id, BOOL, BOOL);
 static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL c) {
     if (origBNDDismissOnlyForce) origBNDDismissOnlyForce(self, _c, a, r, b, c);
@@ -987,62 +991,21 @@ static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL 
     LDDTeardownMediaNow();
     ProbeWrite("BND-DFORCE-CLEAR");
 }
-static BOOL (*origBNDRevokeAll)(id, SEL, id, id, id);
-static BOOL HookBNDRevokeAll(id self, SEL _c, id a, id b, id c) {
-    // 实机编码 B40@0:8@16@24Q32 = 返回 BOOL, 参数(id,id,NSUInteger) —— 必须回传原返回值
-    BOOL r = origBNDRevokeAll ? origBNDRevokeAll(self, _c, a, b, c) : NO;
-    gNotifActive = NO;
-    gNotifSession = NO;
-    gNotifWithdrawn = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gCloseBlockUntil = gNotifTs + 9.0;
-    LDDTeardownMediaNow();
-    ProbeWrite("BND-REVOKE-CLEAR");
-    return r;
-}
-// 1.34: 待呈现快照 setter —— 收起后 8s 内连发的新通知补获信号(PVC 未经历 nil 转换时
-// 轮询无法发现新横幅)。仅当呈现层当前确实持有横幅时才开启会话, 防 Post 阶段误开。
-static void (*origBNDSetSnap)(id, SEL, id);
-static void HookBNDSetSnap(id self, SEL _c, id v) {
-    if (origBNDSetSnap) origBNDSetSnap(self, _c, v);
-    if (v && gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
-        id cur = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
-        if (cur) {
-            gNotifSession = YES;
-            gNotifWithdrawn = NO;
-            gNotifActive = YES;
-            gNotifTs = CFAbsoluteTimeGetCurrent();
-            ProbeWrite("BND-SNAPSHOT-ARM");
-        }
-    }
-}
-// 1.29: 复用 destination 的呈现/收起信号 —— 实机日志证实 destination 常驻复用(每次开机仅 1 次 init),
-// 后续通知不再触发 init; 旧"布局保活"刷新 gNotifTs 成了"任何宽岛都算通知活跃"的毒源
-// (听歌展开条 407x92/285x52 被永久误铺)。_setPresentedPresentableVC: / _dismissBannerCompleted:
-// 在本机 CLOSE-METHOD 枚举中确认存在, 每次真实呈现/收起都会走 —— 以此作为通知生命周期信号。
-// 挂接前校验方法编码必须是 v@:@(单 id 参数), 签名不符不挂, 防止调用约定错位崩溃。
-static void (*origBNDSetPresented)(id, SEL, id);
-static void HookBNDSetPresented(id self, SEL _c, id vc) {
-    if (origBNDSetPresented) origBNDSetPresented(self, _c, vc);
-    if (vc) {
-        gNotifActive = YES;
-        gNotifSession = YES;
-        gNotifWithdrawn = NO;   // 1.32: 新呈现清除收起标志
-        gNotifTs = CFAbsoluteTimeGetCurrent();
-        ProbeWrite("BND-PRESENT-SET");
-    } else {
+// 1.36: 触摸结束(手势离屏) —— 用户划掉/点按横幅的手势结束时立即拆背景。
+// 此时系统收起流程尚未走完(withdraw 等还要等动画提交), 拆这里才能做到视觉上的"立即消失"。
+// 签名按 v@:@ 归一校验; 若此后系统判定通知未收起(如长按展开), 下一次布局会照常重建背景。
+static void (*origBNDInteractEnd)(id, SEL, id);
+static void HookBNDInteractEnd(id self, SEL _c, id vc) {
+    if (origBNDInteractEnd) origBNDInteractEnd(self, _c, vc);
+    if (gContainerView || gNotifSession) {
         gNotifActive = NO;
         gNotifSession = NO;
+        gNotifWithdrawn = YES;
         gNotifTs = CFAbsoluteTimeGetCurrent();
-        ProbeWrite("BND-PRESENT-CLEAR");
+        gCloseBlockUntil = gNotifTs + 9.0;
+        LDDTeardownMediaNow();
+        ProbeWrite("BND-INTERACT-END");
     }
-}
-static void (*origBNDDismissCompleted)(id, SEL, id);
-static void HookBNDDismissCompleted(id self, SEL _c, id vc) {
-    if (origBNDDismissCompleted) origBNDDismissCompleted(self, _c, vc);
-    gNotifActive = NO;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    ProbeWrite("BND-PRESENT-DONE");
 }
 // 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
@@ -2186,7 +2149,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.35");
+    ProbeWrite("LDD-BUILD v1.36");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2221,29 +2184,11 @@ static void LDDInit(void) {
         if (class_getInstanceMethod((Class)clsBND, sO))
             MSHookMessageEx((Class)clsBND, sO, (IMP)HookBNDDismissOnly, (IMP *)&origBNDDismissOnly);
         ProbeWrite("BND-CLOSE-HOOKS-OK");
-        // 1.35: 生命周期钩子 —— 编码经 LDDParseEnc 归一化后精确匹配
-        // (本机为带偏移全量格式 "v24@0:8@16", 1.34 的简写精确匹配全部落空导致钩子没装上)
+        // 1.36: 生命周期钩子(收缩后只保留实测安全的 5 个) —— 编码经 LDDParseEnc 归一化匹配。
+        // 1.35 崩溃结论: Revoke/SetPresented/DismissCompleted/SetSnap 四钩在系统收起链回调时
+        // ARC retain 垃圾指针(SIGSEGV), 全部移除不再安装。
         {
             char pe[64];
-            void *mSP = class_getInstanceMethod((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"));
-            LDDParseEnc(mSP ? method_getTypeEncoding(mSP) : 0, pe, sizeof(pe));
-            if (strcmp(pe, "v@:@") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("_setPresentedPresentableVC:"), (IMP)HookBNDSetPresented, (IMP *)&origBNDSetPresented);
-                ProbeWrite("BND-PRESENT-HOOK");
-            } else {
-                char eb[96]; snprintf(eb, sizeof(eb), "BND-PRESENT-ENC-%.60s", pe);
-                ProbeWrite(eb);
-            }
-            void *mDC = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissBannerCompleted:"));
-            LDDParseEnc(mDC ? method_getTypeEncoding(mDC) : 0, pe, sizeof(pe));
-            if (strcmp(pe, "v@:@") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("_dismissBannerCompleted:"), (IMP)HookBNDDismissCompleted, (IMP *)&origBNDDismissCompleted);
-                ProbeWrite("BND-DONE-HOOK");
-            } else {
-                char eb2[96]; snprintf(eb2, sizeof(eb2), "BND-DONE-ENC-%.60s", pe);
-                ProbeWrite(eb2);
-            }
-            // 1.35: 补充收起变体 + 待呈现快照(实机编码: dforce=v@:B@BB, revoke=B@:@@Q, snap=v@:@)
             void *mF = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"));
             LDDParseEnc(mF ? method_getTypeEncoding(mF) : 0, pe, sizeof(pe));
             if (strcmp(pe, "v@:B@BB") == 0) {
@@ -2253,23 +2198,14 @@ static void LDDInit(void) {
                 char eb3[96]; snprintf(eb3, sizeof(eb3), "BND-DFORCE-ENC-%.60s", pe);
                 ProbeWrite(eb3);
             }
-            void *mR = class_getInstanceMethod((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"));
-            LDDParseEnc(mR ? method_getTypeEncoding(mR) : 0, pe, sizeof(pe));
-            if (strcmp(pe, "B@:@@Q") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("_revokeAllPresentablesWithRequesterIdentifier:reason:options:"), (IMP)HookBNDRevokeAll, (IMP *)&origBNDRevokeAll);
-                ProbeWrite("BND-REVOKE-HOOK");
-            } else {
-                char eb4[96]; snprintf(eb4, sizeof(eb4), "BND-REVOKE-ENC-%.60s", pe);
-                ProbeWrite(eb4);
-            }
-            void *mS = class_getInstanceMethod((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"));
-            LDDParseEnc(mS ? method_getTypeEncoding(mS) : 0, pe, sizeof(pe));
+            void *mIE = class_getInstanceMethod((Class)clsBND, sel_registerName("userInteractionDidEndForBannerForPresentable:"));
+            LDDParseEnc(mIE ? method_getTypeEncoding(mIE) : 0, pe, sizeof(pe));
             if (strcmp(pe, "v@:@") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("setPresentablePendingSnapshot:"), (IMP)HookBNDSetSnap, (IMP *)&origBNDSetSnap);
-                ProbeWrite("BND-SNAP-HOOK");
+                MSHookMessageEx((Class)clsBND, sel_registerName("userInteractionDidEndForBannerForPresentable:"), (IMP)HookBNDInteractEnd, (IMP *)&origBNDInteractEnd);
+                ProbeWrite("BND-INTERACT-HOOK");
             } else {
-                char eb5[96]; snprintf(eb5, sizeof(eb5), "BND-SNAP-ENC-%.60s", pe);
-                ProbeWrite(eb5);
+                char eb6[96]; snprintf(eb6, sizeof(eb6), "BND-INTERACT-ENC-%.60s", pe);
+                ProbeWrite(eb6);
             }
         }
     }
