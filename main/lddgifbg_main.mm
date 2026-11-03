@@ -987,7 +987,7 @@ static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL 
     LDDTeardownMediaNow();
     ProbeWrite("BND-DFORCE-CLEAR");
 }
-static void (*origBNDRevokeAll)(id, SEL, id, id, id);
+static BOOL (*origBNDRevokeAll)(id, SEL, id, id, id);
 static BOOL HookBNDRevokeAll(id self, SEL _c, id a, id b, id c) {
     // 实机编码 B40@0:8@16@24Q32 = 返回 BOOL, 参数(id,id,NSUInteger) —— 必须回传原返回值
     BOOL r = origBNDRevokeAll ? origBNDRevokeAll(self, _c, a, b, c) : NO;
