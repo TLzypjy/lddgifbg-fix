@@ -979,13 +979,12 @@ static const char kLDDNameKey = 0;
             pt.y = maxOff;
             [cv setContentOffset:pt];
         }
-        // 恢复到改名前位置(与 textFieldDidEndEditing 的恢复收敛到同一目标, 谁先触发都一致)
-        if (_preKbdOY > 0) {
-            double target = _preKbdOY;
-            if (target > maxOff) target = maxOff;
-            CGPoint rp = pt; rp.y = target;
-            [cv setContentOffset:rp animated:YES];
-        }
+        // 恢复到改名前位置。1.45: 不再跳过 0 —— 顶部行改名前偏移恰为 0, 跳过会让列表
+        // 停在键盘弹出时的下移位置, 第一排被导航栏挡住一点; 无条件恢复(夹回有效范围)。
+        double target = _preKbdOY;
+        if (target > maxOff) target = maxOff;
+        CGPoint rp = pt; rp.y = target;
+        [cv setContentOffset:rp animated:NO];
         PwB("KBD-HIDE-INSET");
     } @catch (id e) { PwB("KBD-HIDE-EXC"); }
 }
@@ -1449,7 +1448,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.44";
+    NSString *ver = @"1.45";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
