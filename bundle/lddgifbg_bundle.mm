@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
+#include <stdlib.h> // 1.47: PwB 探针裁剪用 malloc
 
 typedef struct objc_class *Class;
 typedef struct objc_object { Class isa; } *id;
