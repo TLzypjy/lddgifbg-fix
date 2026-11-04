@@ -294,7 +294,12 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (void)addTarget:(id)t action:(SEL)a forControlEvents:(NSUInteger)e;
 - (void)setTitle:(NSString *)t forState:(NSUInteger)s;
 - (void)setTitleColor:(id)c forState:(NSUInteger)s;
+- (void)setFont:(id)f;
 @end
+
+#ifndef UIControlEventTouchUpInside
+#define UIControlEventTouchUpInside (1 << 6)
+#endif
 @interface UISwitch : UIView
 - (id)initWithFrame:(CGRect)r;
 - (void)setOn:(BOOL)on animated:(BOOL)a;
@@ -385,6 +390,7 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (id)cellForItemAtIndexPath:(id)ip;
     - (CGPoint)contentOffset;
     - (void)setContentOffset:(CGPoint)o animated:(BOOL)a;
+    - (void)setContentOffset:(CGPoint)o;
     - (UIEdgeInsets)contentInset;
     - (void)setContentInset:(UIEdgeInsets)i;
     - (CGSize)contentSize;
