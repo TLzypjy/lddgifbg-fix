@@ -394,6 +394,7 @@ extern "C" void UIGraphicsEndImageContext(void);
     - (UIEdgeInsets)contentInset;
     - (void)setContentInset:(UIEdgeInsets)i;
     - (CGSize)contentSize;
+    - (UIEdgeInsets)safeAreaInsets;
 @end
 @interface UIImagePickerController : UIViewController
 - (void)setSourceType:(NSInteger)t;
@@ -687,6 +688,7 @@ static id LDDListMaterialFolders(void) {
     id _activeField;
     NSString *_activeName;
     id _activeCell;
+    double _activeCellTop; // 1.46: 正在改名的 cell 内容区顶部 y(判顶排是否被导航栏遮挡)
     double _preKbdOY;   // 1.9.206: beginRename 前的 contentOffset.y, 改名结束恢复滚动
     id _activeLabel; // 1.9.192: 行内改名中被隐藏的名字 label, 结束时恢复显示
     id _activeIp;    // 1.9.201: 正在改名的 cell 的 indexpath, 键盘弹出时滚动到可视区
@@ -694,6 +696,7 @@ static id LDDListMaterialFolders(void) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    _activeCellTop = -1;
     [self setTitle:@"素材库"];
     UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:0 target:self action:@selector(closeTapped)];
     [[self navigationItem] setLeftBarButtonItem:close];
@@ -855,7 +858,9 @@ static const char kLDDNameKey = 0;
     [self beginRename:name inCell:cell atPill:pill];
 }
 - (void)beginRename:(NSString *)name inCell:(id)cell atPill:(id)pill {
-    if (_activeField) [_activeField resignFirstResponder]; // 先结束上一次未完成的编辑
+    _activeCellTop = [(UIView *)cell frame].oy; // 1.46: 记录改名行内容区顶部 y
+
+        if (_activeField) [_activeField resignFirstResponder]; // 先结束上一次未完成的编辑
     id lab = [pill viewWithTag:922]; // 名字文字 label
     CGRect lf = [pill frame];
     if (lab) [lab setHidden:YES];
@@ -979,12 +984,18 @@ static const char kLDDNameKey = 0;
             pt.y = maxOff;
             [cv setContentOffset:pt];
         }
-        // 恢复到改名前位置。1.45: 不再跳过 0 —— 顶部行改名前偏移恰为 0, 跳过会让列表
-        // 停在键盘弹出时的下移位置, 第一排被导航栏挡住一点; 无条件恢复(夹回有效范围)。
+        // 1.46: 恢复滚动; 若改名行顶部会被导航栏遮挡(第一/二排), 下移让整行露出。
+        double safeTop = [cv safeAreaInsets].top; // 导航栏+状态栏遮挡高度
         double target = _preKbdOY;
+        if (_activeCellTop >= 0 && target > _activeCellTop - safeTop) {
+            target = _activeCellTop - safeTop; // 负偏移: 内容下移, 顶排完全露到导航栏下方
+        }
+        double minOff = -safeTop;
+        if (target < minOff) target = minOff;
         if (target > maxOff) target = maxOff;
         CGPoint rp = pt; rp.y = target;
         [cv setContentOffset:rp animated:NO];
+        { char kb[160]; snprintf(kb, sizeof(kb), "KBD-HIDE-target%.0f-safe%.0f-cell%.0f", target, safeTop, _activeCellTop); PwB(kb); }
         PwB("KBD-HIDE-INSET");
     } @catch (id e) { PwB("KBD-HIDE-EXC"); }
 }
@@ -1002,13 +1013,20 @@ static const char kLDDNameKey = 0;
         UICollectionView *cv = (UICollectionView *)_cv;
         CGPoint rp = [cv contentOffset];
         rp.y = _preKbdOY;
-        if (rp.y < 0) rp.y = 0;
-        // 1.44: 恢复目标夹回有效范围(键盘收回时插边已撤, 防止恢复到越界区再次卡住)
+        // 1.46: 顶排改名后下移让整行露出(与 kbdWillHide 一致)
+        double safeTop = [cv safeAreaInsets].top;
+        UIEdgeInsets ins = [cv contentInset];
+        ins.top = safeTop;
+        [cv setContentInset:ins];
+        if (_activeCellTop >= 0 && rp.y > _activeCellTop - safeTop) rp.y = _activeCellTop - safeTop;
+        double minOff = -safeTop;
+        if (rp.y < minOff) rp.y = minOff;
         CGSize csz = [cv contentSize];
         double maxOff = csz.h - [cv bounds].h;
         if (maxOff < 0) maxOff = 0;
         if (rp.y > maxOff) rp.y = maxOff;
         [cv setContentOffset:rp animated:YES];
+        { char kb[160]; snprintf(kb, sizeof(kb), "KBD-END-target%.0f-safe%.0f-cell%.0f", rp.y, safeTop, _activeCellTop); PwB(kb); }
         char kb[128]; snprintf(kb, sizeof(kb), "KBD-RESTORE-y%.0f", rp.y);
         PwB(kb);
     } @catch (id e) { }
@@ -1448,7 +1466,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.45";
+    NSString *ver = @"1.46";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
