@@ -378,9 +378,11 @@ extern "C" void UIGraphicsEndImageContext(void);
 // 1.9.191: 素材网格编辑态抖动/行内改名
 - (id)visibleCells;
 - (id)cellForItemAtIndexPath:(id)ip;
-- (CGPoint)contentOffset;
-- (void)setContentOffset:(CGPoint)o animated:(BOOL)a;
-- (UIEdgeInsets)contentInset;
+    - (CGPoint)contentOffset;
+    - (void)setContentOffset:(CGPoint)o animated:(BOOL)a;
+    - (UIEdgeInsets)contentInset;
+    - (void)setContentInset:(UIEdgeInsets)i;
+    - (CGSize)contentSize;
 @end
 @interface UIImagePickerController : UIViewController
 - (void)setSourceType:(NSInteger)t;
@@ -729,6 +731,7 @@ static id LDDListMaterialFolders(void) {
     // 1.9.203: 探针改写 PwB (用户回传的 __plugin_probe__.txt), 不再写 bundle.log; 加 DidShow 双保险
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(kbdWillShow:) name:@"UIKeyboardWillShowNotification" object:0];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(kbdDidShow:) name:@"UIKeyboardDidShowNotification" object:0];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(kbdWillHide:) name:@"UIKeyboardWillHideNotification" object:0];
     PwB("KBD-OBS-ADDED");
     NSString *cnt = [NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]];
     [self setTitle:cnt];
@@ -861,36 +864,52 @@ static const char kLDDNameKey = 0;
     _activeLabel = lab;
     [tf becomeFirstResponder];
 }
-// 1.9.205: 键盘弹出 -> 把正在改名的 cell 直接滚到集合视图可视区顶部, 完全露出。
-// 1.9.203 的 scrollToItemAtIndexPath:Top 实测静默失效(1.9.141 段 KBD-SCROLL-OK 4 次但内容未滚动,
-// 用户: 素材比较上它已经滚动不了了, 截图证实第 1 行仍在顶部) -> 改用 _activeCell.frame
-// 直接 setContentOffset 到 cell.origin.y - contentInset.top, 不依赖系统滚动判定。
+// 1.43: 键盘弹出 -> 给集合视图加底部插边(=键盘高, 让最底下两行也有滚动余量),
+// 再把改名行"整体"(含名字胶囊+圆点, 底部留 46pt 余量)滚到键盘上方。
+// 旧公式 offY = 行顶y - (列表高-键盘高) 只把行顶对齐键盘上沿, 行体留在键盘后面;
+// 且底部无插边时最后两行滚到 maxOffset 仍够不到键盘上方 -> 用户: 最底下两行改名被键盘遮挡。
+- (double)kbdTargetOffsetForCell:(UIView *)cell kbH:(double)kbH {
+    UICollectionView *cv = (UICollectionView *)_cv;
+    CGRect fr = [cell frame];
+    CGRect cvb = [cv bounds];
+    UIEdgeInsets ins = [cv contentInset];
+    // 让改名行的底缘(再留 46pt 圆点空间)落在键盘上沿之上
+    double want = fr.oy + fr.h + 46.0 - (cvb.h - kbH);
+    if (want < 0) want = 0;
+    CGSize csz = [cv contentSize];
+    double maxOff = csz.height + ins.bottom - cvb.h;
+    if (maxOff < 0) maxOff = 0;
+    if (want > maxOff) want = maxOff;
+    return want;
+}
+- (void)kbdApplyInset:(double)kbH {
+    UICollectionView *cv = (UICollectionView *)_cv;
+    UIEdgeInsets ins = [cv contentInset];
+    ins.bottom = kbH + 8.0;
+    [cv setContentInset:ins];
+}
 - (void)kbdWillShow:(id)n {
     if (!_activeIp) { PwB("KBD-NO-IP"); return; }
     @try {
-        UICollectionView *cv = (UICollectionView *)_cv;
-        if (_activeCell) {
-            // 1.9.206: 键盘高度从通知 userInfo 拿 UIKeyboardFrameEndUserInfoKey (NSValue -> CGRectValue)
-            double kbH = 0;
-            id ui = [n userInfo];
-            if (ui) {
-                id kbv = [ui objectForKey:@"UIKeyboardFrameEndUserInfoKey"];
-                if (kbv && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(kbv, sel_registerName("respondsToSelector:"), sel_registerName("CGRectValue"))) {
-                    // arm64 结构体(<=16B)返回走寄存器, objc_msgSend 直接 cast CGRect 返回类型取
-                    CGRect kf = ((CGRect(*)(id, SEL))objc_msgSend)(kbv, sel_registerName("CGRectValue"));
-                    kbH = kf.h;
-                }
+        double kbH = 0;
+        id ui = [n userInfo];
+        if (ui) {
+            id kbv = [ui objectForKey:@"UIKeyboardFrameEndUserInfoKey"];
+            if (kbv && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(kbv, sel_registerName("respondsToSelector:"), sel_registerName("CGRectValue"))) {
+                // arm64 结构体(<=16B)返回走寄存器, objc_msgSend 直接 cast CGRect 返回类型取
+                CGRect kf = ((CGRect(*)(id, SEL))objc_msgSend)(kbv, sel_registerName("CGRectValue"));
+                kbH = kf.h;
             }
-            CGRect fr = [(UIView *)_activeCell frame];
-            CGRect cvb = [cv bounds];
-            // 目标: cell 顶部对齐键盘顶(可视高 - 键盘高), 最后一行不再滚到最顶留大片空白
-            // (1.9.205 实测: 最后一行 y544 滚到顶, 键盘上方空一大片; 改后仅滚到紧贴键盘)
-            double offY = (kbH > 0) ? (fr.oy - (cvb.h - kbH)) : (fr.oy - [(UICollectionView *)_cv contentInset].top);
-            if (offY < 0) offY = 0;
+        }
+        if (kbH <= 0) { PwB("KBD-NO-H"); return; }
+        [self kbdApplyInset:kbH];
+        if (_activeCell) {
+            double offY = [self kbdTargetOffsetForCell:(UIView *)_activeCell kbH:kbH];
+            UICollectionView *cv = (UICollectionView *)_cv;
             CGPoint pt = [cv contentOffset];
             pt.y = offY;
             [cv setContentOffset:pt animated:YES];
-            char kb[128]; snprintf(kb, sizeof(kb), "KBD-OFFSET-y%.0f-kb%.0f", fr.oy, kbH);
+            char kb[128]; snprintf(kb, sizeof(kb), "KBD-OFFSET-y%.0f-kb%.0f", offY, kbH);
             PwB(kb);
         } else {
             PwB("KBD-NO-CELL");
@@ -898,25 +917,24 @@ static const char kLDDNameKey = 0;
         PwB("KBD-SCROLL-OK");
     } @catch (id e) { PwB("KBD-SCROLL-EXC"); }
 }
-// 1.9.206: 键盘完全弹出后再滚一次 (WillShow 时键盘尚未弹起, 单次滚动可能不到位), 同样紧贴键盘
+// 1.9.206: 键盘完全弹出后再校正一次 (WillShow 时键盘 frame 未定, 单次滚动可能不到位)
 - (void)kbdDidShow:(id)n {
     if (!_activeIp) return;
     @try {
-        UICollectionView *cv = (UICollectionView *)_cv;
-        if (_activeCell) {
-            double kbH = 0;
-            id ui = [n userInfo];
-            if (ui) {
-                id kbv = [ui objectForKey:@"UIKeyboardFrameEndUserInfoKey"];
-                if (kbv && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(kbv, sel_registerName("respondsToSelector:"), sel_registerName("CGRectValue"))) {
-                    CGRect kf = ((CGRect(*)(id, SEL))objc_msgSend)(kbv, sel_registerName("CGRectValue"));
-                    kbH = kf.h;
-                }
+        double kbH = 0;
+        id ui = [n userInfo];
+        if (ui) {
+            id kbv = [ui objectForKey:@"UIKeyboardFrameEndUserInfoKey"];
+            if (kbv && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(kbv, sel_registerName("respondsToSelector:"), sel_registerName("CGRectValue"))) {
+                CGRect kf = ((CGRect(*)(id, SEL))objc_msgSend)(kbv, sel_registerName("CGRectValue"));
+                kbH = kf.h;
             }
-            CGRect fr = [(UIView *)_activeCell frame];
-            CGRect cvb = [cv bounds];
-            double offY = (kbH > 0) ? (fr.oy - (cvb.h - kbH)) : (fr.oy - [(UICollectionView *)_cv contentInset].top);
-            if (offY < 0) offY = 0;
+        }
+        if (kbH <= 0) { PwB("KBD-DID-NO-H"); return; }
+        [self kbdApplyInset:kbH];
+        if (_activeCell) {
+            double offY = [self kbdTargetOffsetForCell:(UIView *)_activeCell kbH:kbH];
+            UICollectionView *cv = (UICollectionView *)_cv;
             CGPoint pt = [cv contentOffset];
             pt.y = offY;
             [cv setContentOffset:pt animated:YES];
@@ -925,6 +943,16 @@ static const char kLDDNameKey = 0;
         }
         PwB("KBD-DIDSHOW-OK");
     } @catch (id e) { PwB("KBD-DIDSHOW-EXC"); }
+}
+// 1.43: 键盘收回 -> 撤掉底部插边 (textFieldDidEndEditing 负责恢复滚动位置)
+- (void)kbdWillHide:(id)n {
+    @try {
+        UICollectionView *cv = (UICollectionView *)_cv;
+        UIEdgeInsets ins = [cv contentInset];
+        ins.bottom = 0;
+        [cv setContentInset:ins];
+        PwB("KBD-HIDE-INSET");
+    } @catch (id e) { PwB("KBD-HIDE-EXC"); }
 }
 - (BOOL)textFieldShouldReturn:(UITextField *)tf {
     [tf resignFirstResponder];
@@ -1382,8 +1410,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [l1 setAutoresizingMask:98];
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
-    // 1.42: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.42";
+    // 1.43: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
+    NSString *ver = @"1.43";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
