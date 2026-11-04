@@ -1033,9 +1033,11 @@ static void HookBNDPresSize(id self, SEL _c, id vc, CGSize psz, CGSize csz) {
 // bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:... 在每条
 // "新通知"创建可呈现对象时触发一次; 划掉后旧通知的药丸重新上岛复用已有对象, 不再触发。
 // 因此它是"真·新通知"的可靠信号: 触发即开会话铺背景(无视划掉屏蔽期)。签名归一校验防崩。
-static void (*origBNDNewBannerV)(id, SEL, id, id, id, id);
-static void HookBNDNewBannerV(id self, SEL _c, id a, id b, id c, id d) {
-    if (origBNDNewBannerV) origBNDNewBannerV(self, _c, a, b, c, d);
+// 1.41: 实机编码 @@:@@@@@? —— 返回 id, 6 参数(5 对象 + 末尾 readyCompletion Block,
+// Block 按指针传参, C 签名以 id 声明 ABI 兼容)
+static void (*origBNDNewBannerV)(id, SEL, id, id, id, id, id, id);
+static void HookBNDNewBannerV(id self, SEL _c, id a, id b, id c, id d, id e, id f) {
+    if (origBNDNewBannerV) origBNDNewBannerV(self, _c, a, b, c, d, e, f);
     gNotifSession = YES;
     gNotifWithdrawn = NO;
     gNotifActive = YES;
@@ -1045,9 +1047,9 @@ static void HookBNDNewBannerV(id self, SEL _c, id a, id b, id c, id d) {
     static int nblog = 0;
     if (nblog < 40) { nblog++; ProbeWrite("BND-NEWBANNER-ARM"); }
 }
-static id (*origBNDNewBannerI)(id, SEL, id, id, id, id);
-static id HookBNDNewBannerI(id self, SEL _c, id a, id b, id c, id d) {
-    id r = origBNDNewBannerI ? origBNDNewBannerI(self, _c, a, b, c, d) : nil;
+static id (*origBNDNewBannerI)(id, SEL, id, id, id, id, id, id);
+static id HookBNDNewBannerI(id self, SEL _c, id a, id b, id c, id d, id e, id f) {
+    id r = origBNDNewBannerI ? origBNDNewBannerI(self, _c, a, b, c, d, e, f) : nil;
     gNotifSession = YES;
     gNotifWithdrawn = NO;
     gNotifActive = YES;
@@ -1056,6 +1058,32 @@ static id HookBNDNewBannerI(id self, SEL _c, id a, id b, id c, id d) {
     gSawWideInSession = NO;
     static int nbilog = 0;
     if (nbilog < 40) { nbilog++; ProbeWrite("BND-NEWBANNER-ARM-I"); }
+    return r;
+}
+// 1.41: 5 参数兜底变体(其他 iOS 版本若无 Block 参数则走这里)
+static void (*origBNDNewBannerV5)(id, SEL, id, id, id, id, id);
+static void HookBNDNewBannerV5(id self, SEL _c, id a, id b, id c, id d, id e) {
+    if (origBNDNewBannerV5) origBNDNewBannerV5(self, _c, a, b, c, d, e);
+    gNotifSession = YES;
+    gNotifWithdrawn = NO;
+    gNotifActive = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    gNotifPresentTs = gNotifTs;
+    gSawWideInSession = NO;
+    static int nbv5log = 0;
+    if (nbv5log < 40) { nbv5log++; ProbeWrite("BND-NEWBANNER-ARM-V5"); }
+}
+static id (*origBNDNewBannerI5)(id, SEL, id, id, id, id, id);
+static id HookBNDNewBannerI5(id self, SEL _c, id a, id b, id c, id d, id e) {
+    id r = origBNDNewBannerI5 ? origBNDNewBannerI5(self, _c, a, b, c, d, e) : nil;
+    gNotifSession = YES;
+    gNotifWithdrawn = NO;
+    gNotifActive = YES;
+    gNotifTs = CFAbsoluteTimeGetCurrent();
+    gNotifPresentTs = gNotifTs;
+    gSawWideInSession = NO;
+    static int nbi5log = 0;
+    if (nbi5log < 40) { nbi5log++; ProbeWrite("BND-NEWBANNER-ARM-I5"); }
     return r;
 }
 // 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
@@ -2234,7 +2262,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.40");
+    ProbeWrite("LDD-BUILD v1.41");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2311,12 +2339,19 @@ static void LDDInit(void) {
                     void *mNB = class_getInstanceMethod((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"));
                     char pe2[64];
                     LDDParseEnc(mNB ? method_getTypeEncoding(mNB) : 0, pe2, sizeof(pe2));
-                    if (strcmp(pe2, "v@:@@@@") == 0 || strcmp(pe2, "v@:@@@@@") == 0) {
+                    // 1.41: 实机编码 @@:@@@@@?(返回 id + 5 对象 + readyCompletion Block)
+                    if (strcmp(pe2, "@@:@@@@@?") == 0) {
+                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI, (IMP *)&origBNDNewBannerI);
+                        ProbeWrite("BND-NEWBANNER-HOOK-I");
+                    } else if (strcmp(pe2, "v@:@@@@@?") == 0) {
                         MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerV, (IMP *)&origBNDNewBannerV);
                         ProbeWrite("BND-NEWBANNER-HOOK-V");
                     } else if (strcmp(pe2, "@@:@@@@") == 0 || strcmp(pe2, "@@:@@@@@") == 0) {
-                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI, (IMP *)&origBNDNewBannerI);
-                        ProbeWrite("BND-NEWBANNER-HOOK-I");
+                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI5, (IMP *)&origBNDNewBannerI5);
+                        ProbeWrite("BND-NEWBANNER-HOOK-I5");
+                    } else if (strcmp(pe2, "v@:@@@@") == 0 || strcmp(pe2, "v@:@@@@@") == 0) {
+                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerV5, (IMP *)&origBNDNewBannerV5);
+                        ProbeWrite("BND-NEWBANNER-HOOK-V5");
                     } else {
                         char eb8[96]; snprintf(eb8, sizeof(eb8), "BND-NEWBANNER-ENC-%.60s", pe2);
                         ProbeWrite(eb8);
