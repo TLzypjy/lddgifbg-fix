@@ -34,10 +34,10 @@ jobs:
           THEOS: ${{ github.workspace }}/theos
         run: |
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
-          # Linux iOS 交叉工具链(官方安装器同款来源)
+          # Linux iOS 交叉工具链(官方安装器同款来源, tar 包自带 linux/iphone/ 路径, 不剥前缀)
           curl -L "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolChain-x86_64.tar.xz" -o /tmp/toolchain.tar.xz
           mkdir -p "$THEOS/toolchain"
-          tar -xJf /tmp/toolchain.tar.xz -C "$THEOS/toolchain" --strip-components=1
+          tar -xJf /tmp/toolchain.tar.xz -C "$THEOS/toolchain"
           # SDK(官方 install-sdk latest)
           "$THEOS/bin/install-sdk" latest
 
