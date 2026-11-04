@@ -1714,6 +1714,7 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
+    static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
         PostRealNotification();
     });
