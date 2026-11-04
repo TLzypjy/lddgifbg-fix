@@ -877,7 +877,7 @@ static const char kLDDNameKey = 0;
     double want = fr.oy + fr.h + 46.0 - (cvb.h - kbH);
     if (want < 0) want = 0;
     CGSize csz = [cv contentSize];
-    double maxOff = csz.height + ins.bottom - cvb.h;
+    double maxOff = csz.h + ins.bottom - cvb.h;
     if (maxOff < 0) maxOff = 0;
     if (want > maxOff) want = maxOff;
     return want;
