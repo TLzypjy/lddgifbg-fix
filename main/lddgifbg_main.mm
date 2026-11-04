@@ -252,7 +252,7 @@ static void PreviewAutoClose(void);
 @end
 
 // ---------- 全局 ----------
-static NSString *gPrefsKeyEnable, *gPrefsKeyZxh, *gPrefsKeyPosX, *gPrefsKeyPosY, *gPrefsKeyFolder;
+static NSString *gPrefsKeyEnable, *gPrefsKeyPosX, *gPrefsKeyPosY, *gPrefsKeyFolder;
 // 1.9.139: 素材原始尺寸 (AspectFill 渲染尺寸计算用) 与内容视图引用
 static double gMediaW = 0, gMediaH = 0;
 static id gContainerView = nil;
@@ -331,11 +331,6 @@ static id LoadPrefsValue(NSString *key) {
 static BOOL IsLddGifBgEnabled(void) {
     id v = LoadPrefsValue(gPrefsKeyEnable);
     return v ? [v boolValue] : YES;
-}
-// 1.9.203: 小岛开关默认关 (用户语义: 未设置时只给通知岛铺, 听歌/直播不铺); 已手动开启过小岛的用户读到 YES 不受影响
-static BOOL IsZxhLddGifBgEnabled(void) {
-    id v = LoadPrefsValue(gPrefsKeyZxh);
-    return v ? [v boolValue] : NO;
 }
 static double GetLddGifBgPos(NSString *key, double fallback) {
     id v = LoadPrefsValue(key);
@@ -747,7 +742,7 @@ static void StartForceMonitor(void) {
 static BOOL ForcePreviewActive(void) { return time(0) < gForceUntil; }
 
 // ---------- prefs 缓存 (1.9.129: 去掉秒节流 —— 素材切换/选择变化必须立即生效) ----------
-static BOOL cEnabled, cZxh;
+static BOOL cEnabled;
 // 1.9.157: prefs 刷新节流 0.5s —— layoutSubviews 每帧触发时不再反复读 4 个 plist+NSUserDefaults,
 // 磁盘 IO 从每帧(最高60次/s)降到 2次/s, 大幅降低发热与 CPU; 设置变化最多 0.5s 内生效
 static double gLastPrefsRefresh = 0;
@@ -763,7 +758,6 @@ static void RefreshPrefsCache(void) {
     if (now - gLastPrefsRefresh < 0.5) return;
     gLastPrefsRefresh = now;
     cEnabled = IsLddGifBgEnabled();
-    cZxh = IsZxhLddGifBgEnabled();
     cPosX = GetLddGifBgPos(gPrefsKeyPosX, 0.0);
     cPosY = GetLddGifBgPos(gPrefsKeyPosY, 0.0);
     cSpeed = GetLddGifBgSpeed();
@@ -798,138 +792,8 @@ static void LogReason(const char *tag, id e) {
 
 // ---------- 捕获横幅呈现层 (hook SBNotificationBannerDestination init) ----------
 static id gPresentLayer = nil;
-static double gNotifTs = -9999.0;   // 1.9.179: 最近通知横幅呈现时间(CFAbsoluteTimeGetCurrent)
-static BOOL gNotifActive = NO;      // 1.9.181: 通知横幅活跃标志(init置YES, 自动关闭置NO)
-static BOOL gNotifWithdrawn = NO;   // 1.33: 收起钩子已触发 —— 同帧压制判定 + 同步拆背景
-static BOOL gNotifSession = NO;     // 1.34: 通知会话中(nil->非nil 转换开启, 收起钩子/PVC清空结束)。
-                                    // 实机证实 presentedPresentableVC 每次查询可能返回新包装对象(指针
-                                    // 持续变化), 早划后还持旧 VC 至原生命周期(~8s) —— 指针追踪不可用;
-                                    // 只有"上一轮为 nil"才允许开启会话, 收起后的持续非 nil 不会重新铺背景
-static double gCloseBlockUntil = 0; // 1.35: 收起钩子后的自动重开屏蔽期(9s ≈ 横幅生命周期) ——
-                                    // 实机证实上划后系统会把通知以药丸形式重新上岛(呈现层经历
-                                    // 清空->非空), 会话被重开导致背景重新铺回; 屏蔽期内 nil->非nil
-                                    // 不自动开会话, 真正的新通知由 setPresentablePendingSnapshot: 钩子补获
-static BOOL gSawWideInSession = NO; // 1.38: 本会话内已铺过宽横幅(≥250x40) —— 上划塌缩检测的前提
-static double gNotifPresentTs = 0;  // 1.38: 本次通知会话的横幅弹出时刻 —— 上划塌缩后屏蔽到
-                                    // 弹出时刻+9.5s(横幅预期自然到期), 药丸重新上岛不再铺回
-// 1.6: 素材/播放器停止时间 (show 分支做空闲释放: 通知关闭>3s 无新通知时释放解码器, 降低 Jetsam 内存压力)
 static double gStreamStopTs = 0;
 static double gVideoStopTs = 0;
-// 1.33: 收起钩子内同步拆除当前背景 —— 用户要求"划掉通知背景立即消失"(不等轮询/布局周期)。
-// 收起钩子在主线程, 与布局同线程, 直接拆安全; 拆掉后收起动画中的宽岛布局会被收起标志压住,
-// 不会再重建背景(nActive 判定含 !gNotifWithdrawn)。
-static void LDDTeardownMediaNow(void) {
-    if (gContainerView) {
-        UIImageView *cvT = (UIImageView *)gContainerView;
-        [cvT stopAnimating];
-        [cvT setImage:nil];
-        [cvT setAnimationImages:nil];
-        [cvT removeFromSuperview];
-        gContainerView = nil;
-        gContentView = nil;
-    }
-    StopVideo();
-    StreamPause();
-    gStreamStopTs = CFAbsoluteTimeGetCurrent();
-    gVideoStopTs = CFAbsoluteTimeGetCurrent();
-    ProbeWrite("TEARDOWN-NOW");
-}
-// 1.35: 归一化 type encoding —— 本机编码为带偏移全量格式("v24@0:8@16"), 简写精确匹配全部落空。
-// 去掉偏移数字后比对参数序列: "v36@0:8B16@20B28B32" -> "v@:B@BB"
-static void LDDParseEnc(const char *te, char *out, int outLen) {
-    int o = 0;
-    if (!te) { if (outLen > 0) out[0] = 0; return; }
-    for (const char *p = te; *p && o < outLen - 1; p++) {
-        if (*p >= '0' && *p <= '9') continue;
-        out[o++] = *p;
-    }
-    out[o] = 0;
-}
-// 1.5: 通知横幅容器识别 —— 沿 superview 链找类名含 Banner/Notification 的视图
-// 场景: banner destination 复用时 init 不再触发, gNotifActive 未激活, 通知收起窄条靠此立即显示 (解决新通知背景延迟~1s)
-// 1.6: 0.15s 结果缓存 (窄条判定不每帧扫链, 降低 CPU)
-// 1.9.186: 场景分类 —— Live Activity(听歌/直播) 与通知横幅(含泛化 Notification 类)分开识别;
-// 缓存按视图指针绑定(原全局缓存会把听歌/直播的"非通知"判定串给真正的通知窄条, 反之亦然,
-// 造成听歌/直播小岛关时"时有时无背景"、通知背景延迟)
-// 注: 本文件不引 Foundation 头, 用 C 枚举
-typedef int LDDSceneKind;
-enum { LDDSceneOther = 0, LDDSceneBanner = 1, LDDSceneActivity = 2 };
-// 1.9.187: 只用于"小岛关时窄条是否通知"的低频判定; 缓存指针用 unsafe_unretained(不 retain 视图,
-// 避免布局期间把被系统释放的视图锁住造成泄漏/悬垂), 深度 6 层足够命中泛化类
-// 1.9.196: 两遍扫描 —— Live Activity(听歌/直播) 链上常含 Notification 泛化类,
-// 若单遍首个命中即判 Banner 会把听歌条误判成通知(小岛关时"时有时无背景");
-// 故先全链找 Activity(优先排除), 再只认明确的 Banner 类(BannerManager/BannerDestination/NotificationBanner),
-// 裸 "Notification" 泛化不再单独判为横幅
-static LDDSceneKind LDDSceneKindOf(id v) {
-    static __unsafe_unretained id gKV = nil;
-    static LDDSceneKind gKR = LDDSceneOther;
-    static double gKT = 0;
-    double nw = CFAbsoluteTimeGetCurrent();
-    if (v == gKV && (nw - gKT) < 0.15) return gKR;
-    // 1.9.200: 全链类名探针(限流) —— 实机确认听歌/直播条链上到底有什么类,
-    // 为后续恢复"通知收起窄条背景"的精确区分做准备
-    static int chainlog = 0;
-    if (chainlog < 10) {
-        chainlog++;
-        id cc = v; int cd = 0;
-        while (cc && cd < 8) {
-            const char *cn2 = class_getName((__bridge void *)object_getClass(cc));
-            char cl[160];
-            snprintf(cl, sizeof(cl), "LDD-CHAIN-%d-%s", cd, cn2 ? cn2 : "?");
-            ProbeWrite(cl);
-            cc = ((id(*)(id, SEL))objc_msgSend)(cc, sel_registerName("superview"));
-            cd++;
-        }
-    }
-    LDDSceneKind k = LDDSceneOther;
-    // 第一遍: 全链找 Activity (听歌/直播/Live Activity 专属类), 优先级最高
-    int depth = 0;
-    id cur = v;
-    while (cur && depth < 8) {
-        const char *cn = class_getName((__bridge void *)object_getClass(cur));
-        if (cn && strstr(cn, "Activity")) {
-            static int alog = 0;
-            if (alog < 200) { alog++; char ab[128]; snprintf(ab, sizeof(ab), "LDD-ACTIVITY-HIT-%s", cn); ProbeWrite(ab); }
-            k = LDDSceneActivity; break;
-        }
-        cur = ((id(*)(id, SEL))objc_msgSend)(cur, sel_registerName("superview"));
-        depth++;
-    }
-    // 第二遍: 只认明确 Banner 类 (真实通知横幅链特征), 不因裸 Notification 泛化误判
-    // 1.9.202: Banner 扫描限深度 3 (self -> superview -> superview.superview)。
-    // 实机 1.9.200/1.9.201 探针证实: 听歌/直播紧凑条链 = contentView->UIView->SBSystemApertureContainerView
-    //   ->SBFTouchPassThroughView... -> SBSystemApertureWindow, 前 3 层无任何 Banner 类;
-    // 但通知横幅出现时其 destination/BannerManager 挂在共享容器(第 3 层及以上)的兄弟/上级,
-    // 旧全链(深度8)扫描会把"听歌条与通知同处一个岛容器"误判为 Banner —— 听歌时来过通知,
-    // 通知窗口(2s)内听歌条被铺背景(用户复现: 听歌时来通知就把听歌岛铺上背景)。
-    // 限深度 3 后, 听歌条前 3 层无 Banner 类 -> Other 不铺; 通知收起窄条若其链前 3 层含
-    //   NotificationBanner 仍判 Banner 正常铺。命中时带深度记录, 供对账误伤。
-    if (k != LDDSceneActivity) {
-        depth = 0;
-        cur = v;
-        while (cur && depth < 3) {
-            const char *cn = class_getName((__bridge void *)object_getClass(cur));
-            if (cn) {
-                if (strstr(cn, "BannerManager") || strstr(cn, "BannerDestination") || strstr(cn, "NotificationBanner")) {
-                    static int blog = 0;
-                    if (blog < 200) { blog++; char bb[128]; snprintf(bb, sizeof(bb), "LDD-BANNER-HIT-%s-d%d", cn, depth); ProbeWrite(bb); }
-                    k = LDDSceneBanner; break;
-                }
-                static int notl = 0;
-                if (notl < 200 && strstr(cn, "Notification")) {
-                    notl++; char nb[128]; snprintf(nb, sizeof(nb), "LDD-NOTIF-GENERIC-%s-d%d", cn, depth); ProbeWrite(nb);
-                }
-            }
-            cur = ((id(*)(id, SEL))objc_msgSend)(cur, sel_registerName("superview"));
-            depth++;
-        }
-    }
-    gKV = v; gKR = k; gKT = nw;
-    return k;
-}
-static BOOL LDDIsBannerContext(id v) {
-    return LDDSceneKindOf(v) == LDDSceneBanner;
-}
 static id (*origBNDInit)(id, SEL);
 static id HookBNDInit(id self, SEL _c) {
     id r = origBNDInit(self, _c);
@@ -937,156 +801,8 @@ static id HookBNDInit(id self, SEL _c) {
     // gPresentLayer 悬垂, 预览自动关闭(6s/10s 撤回)会打在已释放对象上
     if (r && !gPresentLayer) ProbeWrite("BND-CAPTURED");
     if (r) gPresentLayer = r;
-    if (r) { gNotifTs = CFAbsoluteTimeGetCurrent(); gNotifActive = YES; ProbeWrite("BND-NOTIF-TS"); }
     return r;
 }
-// 1.9.199: 横幅关闭钩子 —— 真实通知被划走/超时收起时立即结束通知窗口,
-// 旧 30s 硬窗口把"通知来过"当成"通知还在", 让听歌/直播窄条在小岛关时误铺背景(时有时无)。
-// 三个关闭入口都是 LDDCloseFirstBanner 探针枚举确认存在于呈现层(destination)的方法;
-// 关闭后刷新 gNotifTs 留 2s 收起动画宽限, 供"通知收起窄条"短暂显示。
-static void (*origBNDWithdraw)(id, SEL, id);
-static void HookBNDWithdraw(id self, SEL _c, id req) {
-    if (origBNDWithdraw) origBNDWithdraw(self, _c, req);
-    gNotifActive = NO;
-    gNotifSession = NO;
-    gNotifWithdrawn = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gCloseBlockUntil = gNotifTs + 9.0;   // 1.35: 屏蔽自动重开(药丸重新上岛), 新通知走快照钩子补获
-    LDDTeardownMediaNow();   // 1.33: 划掉的当帧同步拆背景
-    ProbeWrite("BND-WITHDRAW-CLEAR");
-}
-static void (*origBNDDismiss)(id, SEL, BOOL, id, BOOL);
-static void HookBNDDismiss(id self, SEL _c, BOOL a, id r, BOOL f) {
-    if (origBNDDismiss) origBNDDismiss(self, _c, a, r, f);
-    gNotifActive = NO;
-    gNotifSession = NO;
-    gNotifWithdrawn = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gCloseBlockUntil = gNotifTs + 9.0;
-    LDDTeardownMediaNow();
-    ProbeWrite("BND-DISMISS-CLEAR");
-}
-static void (*origBNDDismissOnly)(id, SEL, BOOL, id, BOOL);
-static void HookBNDDismissOnly(id self, SEL _c, BOOL a, id r, BOOL f) {
-    if (origBNDDismissOnly) origBNDDismissOnly(self, _c, a, r, f);
-    gNotifActive = NO;
-    gNotifSession = NO;
-    gNotifWithdrawn = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gCloseBlockUntil = gNotifTs + 9.0;
-    LDDTeardownMediaNow();
-    ProbeWrite("BND-DISMISSONLY-CLEAR");
-}
-// 1.34: 补充收起变体(存在且签名精确匹配才挂, 防调用约定错位)。
-// 1.36: 实机崩溃定位 —— 收起链条中系统回调 Revoke/SetPresented/DismissCompleted/SetSnap
-// 四个钩子时 ARC retain 到垃圾指针(SIGSEGV, 崩溃栈: objc_retain<-插件<-系统 Only3<-插件<-系统 dforce),
-// 四钩全部移除; 只保留编码实测验证过的 dismiss 系钩子。
-// 新增 userInteractionDidEndForBannerForPresentable:(触摸结束)—— 手指离屏瞬间拆背景,
-// 早于系统收起流程, 消除"划掉后背景停留约一秒"。
-static void (*origBNDDismissOnlyForce)(id, SEL, BOOL, id, BOOL, BOOL);
-static void HookBNDDismissOnlyForce(id self, SEL _c, BOOL a, id r, BOOL b, BOOL c) {
-    if (origBNDDismissOnlyForce) origBNDDismissOnlyForce(self, _c, a, r, b, c);
-    gNotifActive = NO;
-    gNotifSession = NO;
-    gNotifWithdrawn = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gCloseBlockUntil = gNotifTs + 9.0;
-    LDDTeardownMediaNow();
-    ProbeWrite("BND-DFORCE-CLEAR");
-}
-// 1.36: 触摸结束(手势离屏) —— 用户划掉/点按横幅的手势结束时立即拆背景。
-// 此时系统收起流程尚未走完(withdraw 等还要等动画提交), 拆这里才能做到视觉上的"立即消失"。
-// 签名按 v@:@ 归一校验; 若此后系统判定通知未收起(如长按展开), 下一次布局会照常重建背景。
-static void (*origBNDInteractEnd)(id, SEL, id);
-static void HookBNDInteractEnd(id self, SEL _c, id vc) {
-    if (origBNDInteractEnd) origBNDInteractEnd(self, _c, vc);
-    if (gContainerView || gNotifSession) {
-        gNotifActive = NO;
-        gNotifSession = NO;
-        gNotifWithdrawn = YES;
-        gNotifTs = CFAbsoluteTimeGetCurrent();
-        gCloseBlockUntil = gNotifTs + 9.0;
-        LDDTeardownMediaNow();
-        ProbeWrite("BND-INTERACT-END");
-    }
-}
-// 1.39: 横幅呈现尺寸回调 —— 区分"新横幅"与"划掉后重新上岛的药丸"的可靠信号:
-// 新通知以展开尺寸(≥250x40)呈现, 药丸永远是紧凑尺寸, 且本回调只在通知横幅上触发
-// (音乐/直播 Live Activity 不走 SBNotificationBannerDestination)。
-// 展开尺寸呈现 = 新横幅上岛 -> 无视划掉屏蔽期立即开会话铺背景; 紧凑尺寸 = 药丸 -> 忽略。
-// 会话已开启时重复触发为无操作(同一条横幅的尺寸更新)。编码宽松校验(v@:@ + 带 CGSize 结构)防崩。
-static void (*origBNDPresSize)(id, SEL, id, CGSize, CGSize);
-static void HookBNDPresSize(id self, SEL _c, id vc, CGSize psz, CGSize csz) {
-    if (origBNDPresSize) origBNDPresSize(self, _c, vc, psz, csz);
-    if (vc && psz.width >= 250.0 && psz.height >= 40.0 && !gNotifSession) {
-        gNotifSession = YES;
-        gNotifWithdrawn = NO;
-        gNotifActive = YES;
-        gNotifTs = CFAbsoluteTimeGetCurrent();
-        gNotifPresentTs = gNotifTs;
-        gSawWideInSession = NO;
-        static int pslog = 0;
-        if (pslog < 30) { pslog++; ProbeWrite("BND-PRESIZE-ARM"); }
-    }
-}
-// 1.40: SBBannerManager 新横幅创建回调 —— v1.39 的呈现尺寸回调在本机不随呈现调用(ARM=0)。
-// bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:... 在每条
-// "新通知"创建可呈现对象时触发一次; 划掉后旧通知的药丸重新上岛复用已有对象, 不再触发。
-// 因此它是"真·新通知"的可靠信号: 触发即开会话铺背景(无视划掉屏蔽期)。签名归一校验防崩。
-// 1.41: 实机编码 @@:@@@@@? —— 返回 id, 6 参数(5 对象 + 末尾 readyCompletion Block,
-// Block 按指针传参, C 签名以 id 声明 ABI 兼容)
-static void (*origBNDNewBannerV)(id, SEL, id, id, id, id, id, id);
-static void HookBNDNewBannerV(id self, SEL _c, id a, id b, id c, id d, id e, id f) {
-    if (origBNDNewBannerV) origBNDNewBannerV(self, _c, a, b, c, d, e, f);
-    gNotifSession = YES;
-    gNotifWithdrawn = NO;
-    gNotifActive = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gNotifPresentTs = gNotifTs;
-    gSawWideInSession = NO;
-    static int nblog = 0;
-    if (nblog < 40) { nblog++; ProbeWrite("BND-NEWBANNER-ARM"); }
-}
-static id (*origBNDNewBannerI)(id, SEL, id, id, id, id, id, id);
-static id HookBNDNewBannerI(id self, SEL _c, id a, id b, id c, id d, id e, id f) {
-    id r = origBNDNewBannerI ? origBNDNewBannerI(self, _c, a, b, c, d, e, f) : nil;
-    gNotifSession = YES;
-    gNotifWithdrawn = NO;
-    gNotifActive = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gNotifPresentTs = gNotifTs;
-    gSawWideInSession = NO;
-    static int nbilog = 0;
-    if (nbilog < 40) { nbilog++; ProbeWrite("BND-NEWBANNER-ARM-I"); }
-    return r;
-}
-// 1.41: 5 参数兜底变体(其他 iOS 版本若无 Block 参数则走这里)
-static void (*origBNDNewBannerV5)(id, SEL, id, id, id, id, id);
-static void HookBNDNewBannerV5(id self, SEL _c, id a, id b, id c, id d, id e) {
-    if (origBNDNewBannerV5) origBNDNewBannerV5(self, _c, a, b, c, d, e);
-    gNotifSession = YES;
-    gNotifWithdrawn = NO;
-    gNotifActive = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gNotifPresentTs = gNotifTs;
-    gSawWideInSession = NO;
-    static int nbv5log = 0;
-    if (nbv5log < 40) { nbv5log++; ProbeWrite("BND-NEWBANNER-ARM-V5"); }
-}
-static id (*origBNDNewBannerI5)(id, SEL, id, id, id, id, id);
-static id HookBNDNewBannerI5(id self, SEL _c, id a, id b, id c, id d, id e) {
-    id r = origBNDNewBannerI5 ? origBNDNewBannerI5(self, _c, a, b, c, d, e) : nil;
-    gNotifSession = YES;
-    gNotifWithdrawn = NO;
-    gNotifActive = YES;
-    gNotifTs = CFAbsoluteTimeGetCurrent();
-    gNotifPresentTs = gNotifTs;
-    gSawWideInSession = NO;
-    static int nbi5log = 0;
-    if (nbi5log < 40) { nbi5log++; ProbeWrite("BND-NEWBANNER-ARM-I5"); }
-    return r;
-}
-// 运行时兜底: 从 dispatcher destinations / SB ivar 找呈现层
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
     const char *cn = class_getName((__bridge void *)object_getClass(o));
@@ -1265,7 +981,6 @@ static void LDDIslandLayout(id self) {
     id win = [selfv window];
     if (!win) { objc_autoreleasePoolPop(pool); return; }
     CGRect bb = [selfv bounds];
-    // 1.9.199: 面容识别全屏场景呈现(ScenePresenterView 407x489)豁免尺寸过滤 —— 不受小岛开关控制,
     // 与 CtrlLayoutHook 的 faceidF 快速过滤保持一致 (旧代码在此被 h>150 拦截, 全屏面容识别铺不到背景)
     const char *fcnSelf = object_getClassName(self);
     int faceidF2 = (fcnSelf && strstr(fcnSelf, "ScenePresenterView"));
@@ -1281,313 +996,38 @@ static void LDDIslandLayout(id self) {
     }
 
     RefreshPrefsCache();
-    BOOL mainOn = cEnabled;
-    BOOL show = NO;
-    CGRect jr = [self bounds];      // 判定尺寸(容器优先), 供探针记录
-    BOOL dbgNA = NO;                // 1.9.196: 探针用 —— 提升到函数作用域, 记录通知活跃窗口
-    BOOL dbgCap = NO;               // 1.9.196: 探针用 —— 记录录屏判定
-    if (mainOn) {
-        // 1.9.179: 小岛开关语义(细化) —— 判定以容器稳定尺寸为准:
-        //   内容层 [self bounds] 在横条动画/展开时会从37跳到92, 直接用内容层高会把放歌/直播横条误判成通知;
-        //   容器高在动画中稳定(横条37/通知92), 故通知判定/录屏判定均以容器尺寸为准
-        //   小岛开: 放歌/直播/通知/小岛 全显示
-        //   小岛关: ① 通知展开/横幅(容器高>=52) 常显
-        //           ② 通知收起态(容器宽<150 窄条, 且处于通知活跃8秒窗口) 常显
-        //           ③ 通知重新弹出动画中间态(容器宽>=250且容器高>=40, 通知活跃窗口内, 如403x44) 常显
-        //           ④ 录屏宽横条(容器高<52且容器宽>=250 且正在录屏) 常显 —— 检测含 isCaptured + ReplayKit
-        //           放歌/直播等紧凑横条(容器高~37, 宽~167/335) 一律不显示
-        if (cZxh) {
-            // 小岛开: 所有岛(放歌/直播/通知/小岛/面容/录屏)都铺背景
-            show = YES;
-        } else {
-            // 小岛关(用户语义): 只有 通知岛/录屏岛/面容岛 铺背景, 听歌/直播等其他岛一律不铺
-            CGRect b0 = [self bounds];
-            id supv = [self superview];
-            if (supv) {
-                CGRect sb = [supv bounds];
-                if (sb.w >= 40.0 && sb.h >= 10.0 && sb.w <= 460.0 && sb.h <= 150.0) {
-                    b0 = sb;                      // 容器尺寸有效才采用
-                }
-            }
-            jr = b0;
-            // 录屏检测 0.3s 节流 (1.9.184): isCaptured/isRecording 每帧 msgSend 有系统查询开销,
-            // 录屏状态不会在 0.3s 内突变, 缓存瞬时值足够; 探针只在重算窗口打印(40次=12s覆盖)
-            static double gCapT = -10.0;
-            static BOOL gCapC = NO;
-            static BOOL gCapR = NO;
-            double capNow = CFAbsoluteTimeGetCurrent();
-            if (capNow - gCapT >= 0.3) {
-                gCapT = capNow;
-                id scr = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("UIScreen"), sel_registerName("mainScreen"));
-                BOOL cap = NO;
-                if (scr) cap = ((BOOL(*)(id, SEL))objc_msgSend)(scr, sel_registerName("isCaptured"));
-                BOOL rpRec = NO;
-                id rpCls = (id)objc_getClass("RPScreenRecorder");
-                if (rpCls) {
-                    id sr = ((id(*)(id, SEL))objc_msgSend)(rpCls, sel_registerName("sharedRecorder"));
-                    if (sr) {
-                        SEL sRec = sel_registerName("isRecording");
-                        if (((BOOL(*)(id, SEL, SEL))objc_msgSend)(sr, sel_registerName("respondsToSelector:"), sRec)) {
-                            rpRec = ((BOOL(*)(id, SEL))objc_msgSend)(sr, sRec);
-                        }
-                    }
-                }
-                gCapC = cap; gCapR = rpRec;
-                static int caplog = 0;
-                if (caplog < 40) {
-                    caplog++;
-                    char cl[64];
-                    snprintf(cl, sizeof(cl), "CAP-DETECT-%d-rp%d-w%.0f-h%.0f", cap ? 1 : 0, rpRec ? 1 : 0, b0.w, b0.h);
-                    ProbeWrite(cl);
-                    // 1.30: 岛内位置探针(加深两级) —— 录屏指示条与听歌条同尺寸同链, 记录容器链
-                    // x 偏移; 若用户要求"录屏时听歌条不铺", 下一版按左右位置精确区分
-                    CGRect sf = ((CGRect(*)(id, SEL))objc_msgSend)(self, sel_registerName("frame"));
-                    id sp2 = ((id(*)(id, SEL))objc_msgSend)((id)self, sel_registerName("superview"));
-                    CGRect spf = sp2 ? ((CGRect(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
-                    id spp = sp2 ? ((id(*)(id, SEL))objc_msgSend)(sp2, sel_registerName("superview")) : nil;
-                    CGRect sppf = spp ? ((CGRect(*)(id, SEL))objc_msgSend)(spp, sel_registerName("frame")) : MakeRect(0, 0, 0, 0);
-                    char pfl[200];
-                    snprintf(pfl, sizeof(pfl), "CAP-FRAME self-x%.0f sup-x%.0f-w%.0f ggp-x%.0f-w%.0f pill-w%.0f", sf.ox, spf.ox, spf.w, sppf.ox, sppf.w, b0.w);
-                    ProbeWrite(pfl);
-                }
-            }
-            BOOL capAll = (gCapC || gCapR);
-            dbgCap = capAll;
-            double nowT = CFAbsoluteTimeGetCurrent();
-            // 1.9.199: 通知窗口收紧 —— 旧 30s 硬窗口把"通知来过"当成"通知还在",
-            // 导致小岛关时听歌/直播窄条在通知后 30s 内误铺背景(时有时无)。
-            //   nActive = 横幅在岛/刚离岛 2 秒内, 由三处刷新: ① BND init(新 destination)
-            //   ② 关闭钩子(划走/超时收起, 留 2s 收起动画宽限) ③ 布局层保活(下方, 横幅形态容器即刷新)
-            // 1.34: 通知活跃 = 会话模型 ——
-            //   ① 轮询 presentedPresentableVC(0.1s 缓存): 上一轮为 nil 且本轮非 nil = 新横幅上岛,
-            //      开启会话; 本轮为 nil = 会话结束。指针持续变化(每次查询新包装对象, 实机
-            //      POLL-NEW-PVC 连发 7 次)不再触发"新通知" —— 早划后呈现层持旧 VC 至原生命周期
-            //      (~8s)期间背景保持清除, 划掉即清、不再被重新铺回。
-            //   ② 收起钩子(划掉/超时): 会话立即结束 + 同步拆背景(TEARDOWN-NOW)。
-            //   ③ 收起后 8s 内连发的新通知: 由 setPresentablePendingSnapshot: 钩子补获(见下)。
-            //   ④ BND init 后 15s 内兜底(开机首条通知)。
-            BOOL presenting = NO;
-            {
-                static double gPollT = 0;
-                static BOOL gPollR = NO;
-                static BOOL gPrevNil = YES;
-                double nwP = CFAbsoluteTimeGetCurrent();
-                if (nwP - gPollT >= 0.1) {
-                    gPollT = nwP;
-                    gPollR = NO;
-                    if (gPresentLayer && ((BOOL(*)(id, SEL, SEL))objc_msgSend)(gPresentLayer, sel_registerName("respondsToSelector:"), sel_registerName("presentedPresentableVC"))) {
-                        id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
-                        double nowBlk = CFAbsoluteTimeGetCurrent();
-                        // 1.37: PVC 抖动防抖 —— 实机证实 presentedPresentableVC 在通知显示期间会
-                        // 间歇性返回 nil(无任何钩子触发, v1.36 日志 52054-52328 反复横跳),
-                        // 单次 nil 即终结会话会让背景闪灭("来通知不铺背景")。
-                        // 连续 nil 达 0.5s 才判会话结束; 划掉/超时仍走收起钩子当帧拆除(不受防抖影响)。
-                        static double gPvcNilSince = 0;
-                        if (!pvc) {
-                            if (!gPvcNilSince) gPvcNilSince = nowBlk;
-                            if (nowBlk - gPvcNilSince >= 0.5) {
-                                gPrevNil = YES;
-                                gNotifSession = NO;
-                            }
-                        } else {
-                            gPvcNilSince = 0;
-                            if (gPrevNil && nowBlk >= gCloseBlockUntil) {
-                                // 屏蔽期外的 nil->非nil 转换 = 新横幅上岛
-                                gNotifSession = YES;
-                                gNotifWithdrawn = NO;
-                                gPrevNil = NO;
-                                gSawWideInSession = NO;
-                                gNotifPresentTs = nowBlk;
-                                static int newlog = 0;
-                                if (newlog < 30) { newlog++; ProbeWrite("POLL-SESSION-START"); }
-                            } else if (!gNotifSession && !gPrevNil && nowBlk >= gCloseBlockUntil) {
-                                // 屏蔽期结束后 PVC 仍非空(新横幅未被快照钩子捕获)兜底开启
-                                gNotifSession = YES;
-                                gNotifWithdrawn = NO;
-                                gSawWideInSession = NO;
-                                gNotifPresentTs = nowBlk;
-                                static int rslog = 0;
-                                if (rslog < 30) { rslog++; ProbeWrite("POLL-SESSION-RESUME"); }
-                            }
-                        }
-                        gPollR = gNotifSession;
-                        static int polllog = 0;
-                        if (polllog < 40) { polllog++; ProbeWrite(gPollR ? "POLL-PRESENTING" : "POLL-IDLE"); }
-                    }
-                }
-                presenting = gPollR;
-            }
-            BOOL nActive = (presenting && !gNotifWithdrawn) || (gNotifActive && ((nowT - gNotifTs) < 15.0));
-            dbgNA = nActive;
-            // 1.9.206: SceneElement 检测 —— 音乐 Live Activity 展开条(407x92/285x52 动态高度)
-            // 与通知横幅尺寸完全重叠, 且同样触发布局层保活刷新 gNotifTs -> 1.9.204 的 nActive 门被击穿
-            // (1.9.145 段实机: show=1 全 nA=1 notifAge=0-1ms scene=0, 听歌岛仍铺背景)。
-            // Live Activity 视图层级含 SBSystemApertureSceneElement* 类(SceneElementAccessory/
-            // AccessoryPortal 等, 1.9.145 段 FILTER-SPECIAL 证实), 通知横幅链无此类
-            // (LDD-CHAIN: ContentView->UIView->SBSystemApertureContainerView->SBFTouchPassThrough
-            // ->SBSystemApertureWindow) -> 以视图链是否含 SceneElement 类区分。
-            int seDepth = 0; id seCur = self; BOOL seHit = NO;
-            while (seCur && seDepth < 12) {
-                const char *sen = class_getName((__bridge void *)object_getClass(seCur));
-                if (sen && strstr(sen, "SceneElement")) {
-                    seHit = YES;
-                    static int selog = 0;
-                    if (selog < 40) { selog++; char se2[160]; snprintf(se2, sizeof(se2), "SE-HIT-%s-d%d-w%.0f-h%.0f", sen, seDepth, b0.w, b0.h); ProbeWrite(se2); }
-                    break;
-                }
-                seCur = ((id(*)(id, SEL))objc_msgSend)(seCur, sel_registerName("superview"));
-                seDepth++;
-            }
-            // 1.29: 移除"布局层保活"(看到 >=250x40 的容器就刷新 gNotifTs)。
-            // 实机日志证实: 听歌展开条(407x92)与通知横幅同尺寸, 保活把通知窗口永久续满,
-            // 是"小岛关时听歌岛被铺背景"的直接根因; 通知在岛/离岛改由 _setPresentedPresentableVC:
-            // 与 _dismissBannerCompleted: 生命周期钩子精确驱动(对本机常驻复用的 destination 同样有效)。
-            const char *clsNow = object_getClassName(self);
-            int faceidC = (clsNow && strstr(clsNow, "ScenePresenterView"));
-            if (faceidC) {
-                // 面容识别/全屏场景呈现(ScenePresenterView 407x489): 不受小岛开关控制
-                show = YES;
-                static int fidl = 0;
-                if (fidl < 40) { fidl++; char fn[96]; snprintf(fn, sizeof(fn), "H52-SHOW-FACEID-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(fn); }
-            } else if (b0.w >= 100.0 && b0.w <= 250.0 && b0.h >= 100.0 && b0.h <= 250.0
-                       && b0.w > b0.h * 0.5 && b0.h > b0.w * 0.5) {
-                // 面容识别近方形容器(144x145 Face ID 图标呈现): 不受小岛开关控制
-                show = YES;
-                static int fid2 = 0;
-                if (fid2 < 40) { fid2++; char fn[96]; snprintf(fn, sizeof(fn), "H52-SHOW-FACEID-SQ-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(fn); }
-            } else if (gNotifSession && !gNotifWithdrawn && gSawWideInSession
-                       && (b0.w < 150.0 || b0.h < 40.0)) {
-                // 1.38: 上划塌缩检测 —— 实机证实上划横幅不触发任何收起钩子/触摸回调, 系统只是把
-                // 横幅缩回药丸形态且通知保持活跃(v1.37 日志: SHOW h=92->83 后药丸反复重新上岛,
-                // 背景滞留约 7s = 通知剩余生命周期)。"已铺过宽横幅的会话出现紧凑布局"即用户划掉:
-                // 立即结束会话+拆背景, 并屏蔽到本条通知预期自然到期(弹出时刻+9.5s),
-                // 药丸重新上岛不再把背景铺回去。
-                gNotifSession = NO;
-                gNotifWithdrawn = YES;
-                gNotifActive = NO;
-                gNotifTs = CFAbsoluteTimeGetCurrent();
-                gCloseBlockUntil = (gNotifPresentTs > 0 ? gNotifPresentTs : gNotifTs) + 9.5;
-                LDDTeardownMediaNow();
-                ProbeWrite("COLLAPSE-DISMISS");
-            } else if (!seHit && nActive && b0.w >= 250.0 && b0.h >= 40.0) {
-                // 通知展开横幅(407x92/422x106)与重弹中间态(285x52/403x44)合并判定:
-                // 通知活跃窗口内 + 非 Live Activity 场景即铺。
-                // nActive 门: 防无通知时音乐展开态(同 407x92)被铺; !seHit 门: SceneElement 类
-                // 检测是通知横幅与 Live Activity(听歌/直播)的真正分界(1.9.145 段实机证实)。
-                // 录屏分支后移到通知之后 —— 旧版录屏分支截断通知判定, 录屏中来通知不铺背景。
-                show = YES;
-                gSawWideInSession = YES;   // 1.38: 本会话已见宽横幅(上划塌缩检测前提)
-                static int h52l = 0;
-                if (h52l < 40) { h52l++; char hn[96]; snprintf(hn, sizeof(hn), "H52-SHOW-NOTIF-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(hn); }
-            } else if (b0.w < 150.0 && !gNotifWithdrawn && LDDIsBannerContext((id)self)) {
-                // 1.38: 补 gNotifWithdrawn 门 —— 用户上划(塌缩检测)后, 通知以药丸形态重新上岛
-                // 也不再铺背景(划掉即消失, 包括药丸形态)
-                // 通知收起窄条(129x38): 场景链含明确 Banner 类(通知横幅专属)才显示;
-                // 听歌/直播紧凑条同尺寸但链无 Banner 类(1.9.200 实机探针证实), 通知窗口内也稳定不铺。
-                show = YES;
-                static int bnl = 0;
-                if (bnl < 8) { bnl++; ProbeWrite("BANNER-CTX-NARROW"); }
-            } else if (capAll) {
-                // 1.30: 录屏中(正在屏幕录制)一律铺背景 —— 用户语义"录屏的时候岛上也要铺上背景"。
-                // 实机 CAP-FRAME 证实录屏紧凑指示条(129x38/176x37)与听歌条同尺寸同视图链且可双条并存,
-                // 无法盲区分, 不再按尺寸/链类收口; 听歌+录屏同时进行时听歌条也会被铺(仅录屏期间)。
-                show = YES;
-                static int reclog3 = 0;
-                if (reclog3 < 40) { reclog3++; char rb[96]; snprintf(rb, sizeof(rb), "REC-CAPTURED-ON-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(rb); }
-            } else {
-                // 听歌/直播(展开/紧凑)及其他岛: 小岛关一律不铺
-                static int h52n = 0;
-                if (h52n < 40) { h52n++; char hn[96]; snprintf(hn, sizeof(hn), "H52-SKIP-NONBANNER-w%.0f-h%.0f", b0.w, b0.h); ProbeWrite(hn); }
-            }
-        }
-    }
+    // 1.42: island switch removed - master ON = every island gets the background,
+    // master OFF = none. The notification/music discrimination stack is retired.
+    BOOL show = cEnabled ? YES : NO;
     static int slog2 = 0;
-    if (slog2 < 40) {
+    if (slog2 < 20) {
         slog2++;
         char sb[96];
-        snprintf(sb, sizeof(sb), "SHOW-%d h=%.0f w=%.0f", show ? 1 : 0, jr.h, jr.w);
+        snprintf(sb, sizeof(sb), "SHOW-%d en=%d w=%.0f h=%.0f", show ? 1 : 0, cEnabled ? 1 : 0, bb.w, bb.h);
         ProbeWrite(sb);
     }
-    // 1.9.196: 全量判定探针(不限流) —— 直接暴露小岛开关实际读取值/通知活跃/录屏/判定结果
-    // 用于定位"听歌时小岛关却时显时不显": zxh=实际读到的启用小岛开关, en=总开关, nA=通知活跃窗口
-    {
-        char db[192];
-        snprintf(db, sizeof(db), "MAT-DECIDE zxh=%d en=%d nA=%d cap=%d w=%.0f h=%.0f show=%d",
-                 cZxh ? 1 : 0, mainOn ? 1 : 0, dbgNA ? 1 : 0, dbgCap ? 1 : 0, jr.w, jr.h, show ? 1 : 0);
-        ProbeWrite(db);
-    }
-    // 1.24+: 铺背景瞬间现场快照(限流30) —— 直接记录"被铺的到底是什么视图":
-    // 类名/容器尺寸/通知窗口剩余时间, 与 MAT-DECIDE 对账即可定位听歌场景残留铺背景的来源
-    // 1.9.202: 窄条(听歌/直播紧凑条 w<160)与宽条分开限流 —— 旧版 30 条额度全被通知宽条
-    // (285x52/407x92 高频)吃掉, 听歌窄条 show=1 的现场永远抓不到; 各 30 条额度独立互不挤占
-    if (show) {
-        static int trl = 0, trn = 0;
-        BOOL narrowTrace = (jr.w < 160.0);
-        if ((narrowTrace && trn < 30) || (!narrowTrace && trl < 30)) {
-            if (narrowTrace) trn++; else trl++;
-            const char *cn0 = object_getClassName(self);
-            double ageMs = (CFAbsoluteTimeGetCurrent() - gNotifTs) * 1000.0;
-            char tb[224];
-            snprintf(tb, sizeof(tb), "SHOW-TRACE%s cls=%s w=%.0f h=%.0f zxh=%d nA=%d cap=%d notifAge=%.0fms scene=%d",
-                     narrowTrace ? "-N" : "", cn0 ? cn0 : "?", jr.w, jr.h, cZxh ? 1 : 0, dbgNA ? 1 : 0, dbgCap ? 1 : 0, ageMs, (int)LDDSceneKindOf((id)self));
-            ProbeWrite(tb);
-        }
-    }
     if (!show) {
-        // 场景隔离清理: 全局媒体管线(gContainerView/gPlayer/gStream)可能正被"另一个岛场景"使用
-        // (如通知横幅展开时听歌条同帧布局)。旧逻辑无条件拆 gContainerView, 把正在显示的
-        // 通知背景拆掉 -> 背景"时有无无"。改: 仅当背景挂在本视图树(含父容器)内、或已脱离
-        // 任何视图(系统已销毁场景)时才停播/拆除; 其他场景正在使用时只清本树内残留。
-        // 另: 旧清理路径从不移除诊断色块(tag 9997/9996) -> 无素材时来一次通知, 红块永久残留。
+        // 1.42: master OFF - strip background from this tree and tear down media.
         RemoveTagged(self, 9997);
         RemoveTagged(self, 9996);
-        UIImageView *oldV = nil;
-        BOOL gAttached = NO;      // gContainerView 还挂在某个视图树上
+        RemoveTagged(self, 9999);
+        RemoveTagged(self, 9998);
         if (gContainerView) {
-            id gsup = ((id(*)(id, SEL))objc_msgSend)((id)gContainerView, sel_registerName("superview"));
-            if (gsup) {
-                gAttached = YES;
-                id selfSup = ((id(*)(id, SEL))objc_msgSend)((id)self, sel_registerName("superview"));
-                id p = (id)gContainerView;
-                int up = 0;
-                while (p && up < 10) {
-                    // 挂在本视图树内, 或挂在本视图的父容器(BG-EXTEND 场景) -> 本场景的背景
-                    if (p == (id)self || (selfSup && p == selfSup)) { oldV = (UIImageView *)gContainerView; break; }
-                    p = ((id(*)(id, SEL))objc_msgSend)(p, sel_registerName("superview"));
-                    up++;
-                }
-            }
+            UIImageView *cvT = (UIImageView *)gContainerView;
+            [cvT stopAnimating];
+            [cvT setImage:nil];
+            [cvT setAnimationImages:nil];
+            [cvT removeFromSuperview];
+            gContainerView = nil;
+            gContentView = nil;
         }
-        if (!oldV) oldV = (UIImageView *)[self viewWithTag:9999];
-        // 本场景是否负责拆除媒体: 背景挂在本树/父容器内, 或背景已脱离所有视图(无主残留)
-        BOOL ownsMedia = !gAttached || (gContainerView && oldV == (UIImageView *)gContainerView);
-        if (ownsMedia) {
-            if (oldV) { [oldV stopAnimating]; [oldV setImage:nil]; [oldV setAnimationImages:nil]; }
-            StopVideo();
-            StreamPause();
-            if (gContainerView) {
-                [gContainerView stopAnimating];
-                [gContainerView removeFromSuperview];
-                gContainerView = nil;
-                gContentView = nil;
-            }
-            RemoveTagged(self, 9999);
-            RemoveTagged(self, 9998);
-            // 1.6: 记录停止时间, show 分支据此做空闲释放 (通知关闭>3s 无新通知时释放解码器/素材)
-            if (oldV || gPlayer || gStreamSrc) {
-                gStreamStopTs = CFAbsoluteTimeGetCurrent();
-                gVideoStopTs = CFAbsoluteTimeGetCurrent();
-            }
-        } else {
-            // 背景正被其他场景使用: 只清本树内可能存在的旧场景残留空壳
-            RemoveTagged(self, 9999);
-            RemoveTagged(self, 9998);
-        }
+        StopVideo();
+        StreamPause();
+        gStreamStopTs = CFAbsoluteTimeGetCurrent();
+        gVideoStopTs = CFAbsoluteTimeGetCurrent();
         objc_autoreleasePoolPop(pool);
         return;
     }
-
-    // 1.6: 空闲释放 —— 上次停止超过3s 无新通知, 释放常驻解码器/素材 (降低 Jetsam 内存压力)
     if (gStreamStopTs) {
         double nwA = CFAbsoluteTimeGetCurrent();
         if (nwA - gStreamStopTs > 3.0) { StreamStop(); }
@@ -1949,7 +1389,6 @@ static void LDDCloseFirstBanner(id req) {
                 @try {
                     ((void(*)(id, SEL, id))objc_msgSend)(gPresentLayer, sW, req);
                     ProbeWrite("CLOSE-WITHDRAW-OK");
-                    gNotifActive = NO;
                     return;
                 } @catch (id e) { LogReason("CLOSE-WITHDRAW-EXC", e); }
             }
@@ -1962,7 +1401,6 @@ static void LDDCloseFirstBanner(id req) {
                 @try {
                     ((void(*)(id, SEL, BOOL, id, BOOL))objc_msgSend)(gPresentLayer, sD, YES, @"ldd-autoclose", NO);
                     ProbeWrite("CLOSE-DISMISSBANNER-OK");
-                    gNotifActive = NO;
                     return;
                 } @catch (id e) { LogReason("CLOSE-DISMISSBANNER-EXC", e); }
             }
@@ -1975,7 +1413,6 @@ static void LDDCloseFirstBanner(id req) {
                 @try {
                     ((void(*)(id, SEL, BOOL, id, BOOL))objc_msgSend)(gPresentLayer, sO, YES, @"ldd-autoclose", YES);
                     ProbeWrite("CLOSE-DISMISSONLY-OK");
-                    gNotifActive = NO;
                     return;
                 } @catch (id e) { LogReason("CLOSE-DISMISSONLY-EXC", e); }
             }
@@ -2236,13 +1673,6 @@ static void PostRealNotification(void) {
                 ((void(*)(id, SEL, id))objc_msgSend)(layer, sPost, req);
                 ProbeWrite("RN-PRES-SENT");
                 gActiveReq = req;
-                // 1.9.183: 预览通知呈现成功 -> 通知活跃生命周期绑定 RN 流程 (返回桌面收起/重弹全程显示, 不依赖 BND init)
-                gNotifTs = CFAbsoluteTimeGetCurrent();
-                gNotifActive = YES;
-                gNotifSession = YES;
-                gNotifWithdrawn = NO;   // 1.32: 预览投递清除收起标志
-                gSawWideInSession = NO;
-                gNotifPresentTs = gNotifTs;
                 // 1.9.163: 预览通知弹出时视频从头播放 (seek 0, 合法 CMTime)
                 if (gPlayer && gPlayerItem) {
                     typedef id (*Fn)(id, SEL, struct CMTimeRaw);
@@ -2262,7 +1692,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.41");
+    ProbeWrite("LDD-BUILD v1.42");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -2274,7 +1704,6 @@ static void LDDInit(void) {
         ProbeWrite("CTRL-CLASS-NIL");
     }
     gPrefsKeyEnable = @"Enablelddgifbg";
-    gPrefsKeyZxh = @"Enablezxhlddgifbg";
     gPrefsKeyPosX = @"lddgifbgPosX";
     gPrefsKeyPosY = @"lddgifbgPosY";
     gPrefsKeyFolder = @"SelectedMaterialFolder";
@@ -2285,85 +1714,6 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
-    // 1.9.199: 关闭入口钩子 —— 划走/超时收起即结束通知窗口 (方法存在才挂, 不存在的版本跳过)
-    if (clsBND) {
-        SEL sW = sel_registerName("withdrawNotificationRequest:");
-        if (class_getInstanceMethod((Class)clsBND, sW))
-            MSHookMessageEx((Class)clsBND, sW, (IMP)HookBNDWithdraw, (IMP *)&origBNDWithdraw);
-        SEL sD = sel_registerName("_dismissPresentedBannerAnimated:reason:forceIfSticky:");
-        if (class_getInstanceMethod((Class)clsBND, sD))
-            MSHookMessageEx((Class)clsBND, sD, (IMP)HookBNDDismiss, (IMP *)&origBNDDismiss);
-        SEL sO = sel_registerName("_dismissPresentedBannerOnly:reason:animated:");
-        if (class_getInstanceMethod((Class)clsBND, sO))
-            MSHookMessageEx((Class)clsBND, sO, (IMP)HookBNDDismissOnly, (IMP *)&origBNDDismissOnly);
-        ProbeWrite("BND-CLOSE-HOOKS-OK");
-        // 1.36: 生命周期钩子(收缩后只保留实测安全的 5 个) —— 编码经 LDDParseEnc 归一化匹配。
-        // 1.35 崩溃结论: Revoke/SetPresented/DismissCompleted/SetSnap 四钩在系统收起链回调时
-        // ARC retain 垃圾指针(SIGSEGV), 全部移除不再安装。
-        {
-            char pe[64];
-            void *mF = class_getInstanceMethod((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"));
-            LDDParseEnc(mF ? method_getTypeEncoding(mF) : 0, pe, sizeof(pe));
-            if (strcmp(pe, "v@:B@BB") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"), (IMP)HookBNDDismissOnlyForce, (IMP *)&origBNDDismissOnlyForce);
-                ProbeWrite("BND-DFORCE-HOOK");
-            } else {
-                char eb3[96]; snprintf(eb3, sizeof(eb3), "BND-DFORCE-ENC-%.60s", pe);
-                ProbeWrite(eb3);
-            }
-            void *mIE = class_getInstanceMethod((Class)clsBND, sel_registerName("userInteractionDidEndForBannerForPresentable:"));
-            LDDParseEnc(mIE ? method_getTypeEncoding(mIE) : 0, pe, sizeof(pe));
-            if (strcmp(pe, "v@:@") == 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("userInteractionDidEndForBannerForPresentable:"), (IMP)HookBNDInteractEnd, (IMP *)&origBNDInteractEnd);
-                ProbeWrite("BND-INTERACT-HOOK");
-            } else {
-                char eb6[96]; snprintf(eb6, sizeof(eb6), "BND-INTERACT-ENC-%.60s", pe);
-                ProbeWrite(eb6);
-            }
-            // 1.39: 呈现尺寸回调(宽松校验: 返回 v + self/cmd + id + 两个 CGSize 结构) ——
-            // 展开尺寸呈现 = 新横幅(无视划掉屏蔽期立即铺背景), 紧凑 = 药丸(忽略)
-            void *mPS = class_getInstanceMethod((Class)clsBND, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
-            LDDParseEnc(mPS ? method_getTypeEncoding(mPS) : 0, pe, sizeof(pe));
-            if (strncmp(pe, "v@:@", 4) == 0 && strstr(pe, "CGSize") != 0) {
-                MSHookMessageEx((Class)clsBND, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"), (IMP)HookBNDPresSize, (IMP *)&origBNDPresSize);
-                ProbeWrite("BND-PRESIZE-HOOK");
-            } else {
-                char eb7[96]; snprintf(eb7, sizeof(eb7), "BND-PRESIZE-ENC-%.60s", pe);
-                ProbeWrite(eb7);
-            }
-            // 1.40: SBBannerManager 新横幅创建回调 —— 每"新通知"触发一次(药丸重新上岛不触发),
-            // 触发即开会话铺背景(无视划掉屏蔽期)。返回类型两种形态都支持。
-            {
-                id clsBM = objc_getClass("SBBannerManager");
-                if (clsBM) {
-                    void *mNB = class_getInstanceMethod((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"));
-                    char pe2[64];
-                    LDDParseEnc(mNB ? method_getTypeEncoding(mNB) : 0, pe2, sizeof(pe2));
-                    // 1.41: 实机编码 @@:@@@@@?(返回 id + 5 对象 + readyCompletion Block)
-                    if (strcmp(pe2, "@@:@@@@@?") == 0) {
-                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI, (IMP *)&origBNDNewBannerI);
-                        ProbeWrite("BND-NEWBANNER-HOOK-I");
-                    } else if (strcmp(pe2, "v@:@@@@@?") == 0) {
-                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerV, (IMP *)&origBNDNewBannerV);
-                        ProbeWrite("BND-NEWBANNER-HOOK-V");
-                    } else if (strcmp(pe2, "@@:@@@@") == 0 || strcmp(pe2, "@@:@@@@@") == 0) {
-                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerI5, (IMP *)&origBNDNewBannerI5);
-                        ProbeWrite("BND-NEWBANNER-HOOK-I5");
-                    } else if (strcmp(pe2, "v@:@@@@") == 0 || strcmp(pe2, "v@:@@@@@") == 0) {
-                        MSHookMessageEx((Class)clsBM, sel_registerName("bannerSourceListener:newBannerSourceListenerPresentableForBannerSpecification:serviceDomain:scene:readyCompletion:"), (IMP)HookBNDNewBannerV5, (IMP *)&origBNDNewBannerV5);
-                        ProbeWrite("BND-NEWBANNER-HOOK-V5");
-                    } else {
-                        char eb8[96]; snprintf(eb8, sizeof(eb8), "BND-NEWBANNER-ENC-%.60s", pe2);
-                        ProbeWrite(eb8);
-                    }
-                } else {
-                    ProbeWrite("BND-NEWBANNER-NOCLS");
-                }
-            }
-        }
-    }
-    // Darwin notify: 设置端点"预览通知"即时触发 (灵动通知同款机制)
-    static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
         PostRealNotification();
     });
