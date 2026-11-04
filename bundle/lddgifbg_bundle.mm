@@ -221,6 +221,7 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 @end
 @interface UILongPressGestureRecognizer : UIGestureRecognizer
 - (void)setMinimumPressDuration:(double)d;
+- (void)setEnabled:(BOOL)e;
 @end
 @interface UIControl : UIView
 - (void)addTarget:(id)t action:(SEL)a forControlEvents:(NSUInteger)e;
@@ -289,7 +290,11 @@ extern "C" void UIGraphicsEndImageContext(void);
 @interface UIView (Spring)
 + (void)animateWithDuration:(double)d delay:(double)dl usingSpringWithDamping:(double)damp initialSpringVelocity:(double)vel options:(NSUInteger)opt animations:(void(^)(void))anim completion:(void(^)(BOOL))comp;
 @end
-@interface UIButton : UIView @end
+@interface UIButton : UIView
+- (void)addTarget:(id)t action:(SEL)a forControlEvents:(NSUInteger)e;
+- (void)setTitle:(NSString *)t forState:(NSUInteger)s;
+- (void)setTitleColor:(id)c forState:(NSUInteger)s;
+@end
 @interface UISwitch : UIView
 - (id)initWithFrame:(CGRect)r;
 - (void)setOn:(BOOL)on animated:(BOOL)a;
@@ -679,6 +684,7 @@ static id LDDListMaterialFolders(void) {
     double _preKbdOY;   // 1.9.206: beginRename 前的 contentOffset.y, 改名结束恢复滚动
     id _activeLabel; // 1.9.192: 行内改名中被隐藏的名字 label, 结束时恢复显示
     id _activeIp;    // 1.9.201: 正在改名的 cell 的 indexpath, 键盘弹出时滚动到可视区
+    id _editLP;      // 1.44: 集合视图长按手势(进编辑态用) —— 编辑态期间禁用, 防长按抢占删除钮点击
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -725,6 +731,7 @@ static id LDDListMaterialFolders(void) {
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longPressTapped:)];
     [lp setMinimumPressDuration:0.4];
     [cv addGestureRecognizer:lp];
+    _editLP = lp;   // 1.44: 编辑态期间禁用, 防长按抢占删除钮点击
     [[self view] addSubview:cv];
     _cv = cv;
     // 1.9.201: 键盘弹出 -> 把正在改名的 cell 滚到可视区 (底两行改名不再被键盘盖住)
@@ -786,6 +793,8 @@ static id LDDListMaterialFolders(void) {
     UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:0 target:self action:@selector(exitEditing)];
     [[self navigationItem] setRightBarButtonItems:[NSArray arrayWithObjects:done, nil]];
     [(UICollectionView *)_cv reloadData];
+    // 1.44: 编辑态禁用长按手势 —— 手指按删除钮超过 0.4s 会触发长按并取消点击
+    [(UILongPressGestureRecognizer *)_editLP setEnabled:NO];
     [self startJiggling];
 }
 - (void)exitEditing {
@@ -793,6 +802,8 @@ static id LDDListMaterialFolders(void) {
     if (_activeField) [_activeField resignFirstResponder]; // 保存未完成的改名
     [self stopJiggling];
     _editMode = NO;
+    // 1.44: 退出编辑态恢复长按手势
+    [(UILongPressGestureRecognizer *)_editLP setEnabled:YES];
     UIBarButtonItem *imp = [[UIBarButtonItem alloc] initWithTitle:@"导入" style:0 target:self action:@selector(importTapped)];
     [[self navigationItem] setRightBarButtonItems:[NSArray arrayWithObjects:imp, nil]];
     [self setTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
@@ -944,13 +955,31 @@ static const char kLDDNameKey = 0;
         PwB("KBD-DIDSHOW-OK");
     } @catch (id e) { PwB("KBD-DIDSHOW-EXC"); }
 }
-// 1.43: 键盘收回 -> 撤掉底部插边 (textFieldDidEndEditing 负责恢复滚动位置)
+// 1.44: 键盘收回 -> 撤掉底部插边, 并把滚动位置夹回有效范围 + 恢复到改名前位置。
+// 1.43 教训: 只撤插边不夹偏移, 偏移停在插边撑出的越界区里, 列表表现为"卡住不能滚"。
 - (void)kbdWillHide:(id)n {
     @try {
         UICollectionView *cv = (UICollectionView *)_cv;
+        // 先撤插边
         UIEdgeInsets ins = [cv contentInset];
         ins.bottom = 0;
         [cv setContentInset:ins];
+        // 夹回有效范围
+        CGSize csz = [cv contentSize];
+        CGPoint pt = [cv contentOffset];
+        double maxOff = csz.h - [cv bounds].h;
+        if (maxOff < 0) maxOff = 0;
+        if (pt.y > maxOff) {
+            pt.y = maxOff;
+            [cv setContentOffset:pt];
+        }
+        // 恢复到改名前位置(与 textFieldDidEndEditing 的恢复收敛到同一目标, 谁先触发都一致)
+        if (_preKbdOY > 0) {
+            double target = _preKbdOY;
+            if (target > maxOff) target = maxOff;
+            CGPoint rp = pt; rp.y = target;
+            [cv setContentOffset:rp animated:YES];
+        }
         PwB("KBD-HIDE-INSET");
     } @catch (id e) { PwB("KBD-HIDE-EXC"); }
 }
@@ -969,6 +998,11 @@ static const char kLDDNameKey = 0;
         CGPoint rp = [cv contentOffset];
         rp.y = _preKbdOY;
         if (rp.y < 0) rp.y = 0;
+        // 1.44: 恢复目标夹回有效范围(键盘收回时插边已撤, 防止恢复到越界区再次卡住)
+        CGSize csz = [cv contentSize];
+        double maxOff = csz.h - [cv bounds].h;
+        if (maxOff < 0) maxOff = 0;
+        if (rp.y > maxOff) rp.y = maxOff;
         [cv setContentOffset:rp animated:YES];
         char kb[128]; snprintf(kb, sizeof(kb), "KBD-RESTORE-y%.0f", rp.y);
         PwB(kb);
@@ -1239,21 +1273,19 @@ static const char kLDDNameKey = 0;
         [card addSubview:vb];
     }
     // 1.9.191: 编辑态删除钮(红底白"-", 圆心卡缩略图右上角: 一半盖图角一半伸出, 随卡片一起抖动)
+    // 1.44: 换真 UIButton(UIControl 触控处理比"普通视图+点按手势"可靠, 抖动中也能稳定命中)
+    // 并加大热区(26x26), 删除确认弹窗兜底防误触
     if (_editMode) {
-        UIView *delv = [[UIView alloc] initWithFrame:MakeRect(cardW - 10, -9, 20, 20)];
+        UIButton *delv = [[UIButton alloc] initWithFrame:MakeRect(cardW - 14, -12, 26, 26)];
         [delv setBackgroundColor:[UIColor redColor]];
-        [[delv layer] setCornerRadius:10.0];
+        [[delv layer] setCornerRadius:13.0];
         [[delv layer] setMasksToBounds:YES];
-        UILabel *mn = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 20, 20)];
-        [mn setText:@"-"];
-        [mn setFont:[UIFont systemFontOfSize:17.0]];
-        [mn setTextAlignment:1];
-        [mn setTextColor:[UIColor whiteColor]];
-        [delv addSubview:mn];
+        [delv setTitle:@"-" forState:0];
+        [delv setTitleColor:[UIColor whiteColor] forState:0];
+        [delv setFont:[UIFont boldSystemFontOfSize:19.0]];
+        [delv addTarget:self action:@selector(delBtnTapped:) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:delv];
-        UITapGestureRecognizer *dg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(delBtnTapped:)];
-        [delv addGestureRecognizer:dg];
-        objc_setAssociatedObject(dg, &kLDDDelKey, name, 1); // OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        objc_setAssociatedObject(delv, &kLDDDelKey, name, 1); // OBJC_ASSOCIATION_RETAIN_NONATOMIC
     }
     [[cell contentView] addSubview:card];
     // 名字胶囊 (点按 -> 行内改名); 1.9.201: x=10 与卡片(x=6,宽cardW)水平居中对齐 —— 用户反馈胶囊偏左
@@ -1410,8 +1442,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [l1 setAutoresizingMask:98];
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
-    // 1.43: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.43";
+    // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
+    NSString *ver = @"1.44";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
