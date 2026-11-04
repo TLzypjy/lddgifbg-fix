@@ -457,7 +457,7 @@ static void WritePrefsFile(NSString *key, id value) {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     // 底: NSUserDefaults 全键 (面板写过的一定在)
     NSUserDefaults *ud0 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"Enablezxhlddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"SelectedMaterialFolder", nil]) {
+    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"SelectedMaterialFolder", nil]) {
         id v = [ud0 objectForKey:k];
         if (v) [d setObject:v forKey:k];
     }
@@ -1329,7 +1329,7 @@ static const char kLDDNameKey = 0;
 - (NSInteger)numberOfSectionsInTableView:(id)tv { return 1; }
 // 1.9.140: 行数 10 (0/1开关 2预览 3水平偏移 4垂直偏移 5速度 6选素材 7跳转 8预览通知 9注销)
 // 1.9.184: 行数 10 (版本/作者 移除, 改底部居中版权 footer)
-- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 10; }
+- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 9; }
 // 1.9.156: 输入框预填值去小数 (偏移=整数, 速度=去尾零保留1位)
 static NSString *LDDInputNum(double v, BOOL isSpeed) {
     if (!isSpeed) return [NSString stringWithFormat:@"%.0f", v];
@@ -1351,7 +1351,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     *piw = iw; *pih = ih;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
-    if ([ip row] == 2) {
+    if ([ip row] == 1) {
         // 1.9.146: 预览行高度贴合预览药丸, 消除上下大面积留白
         CGRect tb = [tv bounds];
         double bw = tb.w; if (bw < 100) bw = 390;
@@ -1382,8 +1382,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [l1 setAutoresizingMask:98];
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
-    // 1.41: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.41";
+    // 1.42: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
+    NSString *ver = @"1.42";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1415,22 +1415,21 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     for (UIView *v in [[cell contentView] subviews]) { if (v) [v removeFromSuperview]; }
     [cell setSelectionStyle:0];
     [cell setAccessoryType:0];
-    if (row == 0 || row == 1) {
+    if (row == 0) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 110, 22)];
-        [label setText:(row == 0 ? @"启用总开关" : @"启用小岛")];
+        [label setText:@"启用总开关"];
         [label setFont:[UIFont systemFontOfSize:16.0]];
         [[cell contentView] addSubview:label];
         UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 14, 51, 31)];
-        [sw setTag:(row == 0 ? 1001 : 1002)];
+        [sw setTag:1001];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:(row == 0 ? @"Enablelddgifbg" : @"Enablezxhlddgifbg")];
-        // 默认值与主插件一致: 总开关默认开, 小岛默认关(未设置时只通知/录屏/面容铺, 听歌/直播不铺)
-        // 旧版两行都默认 YES, 与主插件 IsZxhLddGifBgEnabled 默认 NO 相反 -> 新装机面板显示与实际行为不符
-        BOOL on = v ? [v boolValue] : (row == 0 ? YES : NO);
+        id v = [ud objectForKey:@"Enablelddgifbg"];
+        // 1.42: 仅剩总开关 —— 开=所有岛铺背景, 关=全部不铺(小岛开关已移除)
+        BOOL on = v ? [v boolValue] : YES;
         [sw setOn:on animated:NO];
         [sw addTarget:self action:@selector(switchToggled:) forControlEvents:1 << 12];
         [[cell contentView] addSubview:sw];
-    } else if (row == 2) {
+    } else if (row == 1) {
         // 1.9.140: 实时预览 (黑底药丸模拟灵动岛 + 素材首帧 + 当前偏移)
         [cell setSelectionStyle:0];
         // 1.9.146: 尺寸统一走 LDDPreviewSize (岛比例 + 面板宽缩放)
@@ -1469,7 +1468,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [box addSubview:tip];
         }
         LDDUpdatePreview();
-    } else if (row == 3) {
+    } else if (row == 2) {
         // 1.9.140: 水平偏移 (左右调整显示区域, -200~200, 默认0)
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
         [label setText:@"水平偏移"];
@@ -1497,7 +1496,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
-    } else if (row == 4) {
+    } else if (row == 3) {
         // 1.9.140: 垂直偏移 (上下调整显示区域, -200~200, 默认0)
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
         [label setText:@"垂直偏移"];
@@ -1525,7 +1524,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
-    } else if (row == 5) {
+    } else if (row == 4) {
         // 1.9.133: 播放速度滑块 (0.5x~2.0x)
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
         [label setText:@"播放速度"];
@@ -1555,11 +1554,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
     } else {
-        NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"跳转素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
+        NSString *t = (row == 5 ? @"选择素材" : (row == 6 ? @"跳转素材目录" : (row == 7 ? @"预览通知" : @"立即注销")));
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:16.0]];
-        if (row == 9) [label setTextColor:[UIColor redColor]];
+        if (row == 8) [label setTextColor:[UIColor redColor]];
         [[cell contentView] addSubview:label];
         [cell setSelectionStyle:1];
     }
@@ -1568,12 +1567,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
-    // 1.9.184: 行号与 UI 同步 (0/1开关 2预览 3水平偏移 4垂直偏移 5速度 6选素材 7跳转 8预览通知 9注销)
-    if (row == 6) {
+    // 1.42: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
+    if (row == 5) {
         LDDMaterialPickerController *pc = [[LDDMaterialPickerController alloc] init];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pc];
         [self presentViewController:nav animated:YES completion:0];
-    } else if (row == 7) {
+    } else if (row == 6) {
         UIApplication *app = [UIApplication sharedApplication];
         NSURL *fz = [NSURL URLWithString:@"filza://view/var/mobile/lddgifbg"];
         [app openURL:fz options:[NSDictionary dictionary] completionHandler:^(BOOL ok){
@@ -1582,14 +1581,14 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
                 [app openURL:url options:[NSDictionary dictionary] completionHandler:0];
             }
         }];
-    } else if (row == 8) {
+    } else if (row == 7) {
         [self showBannerPreview];
-    } else if (row == 9) {
+    } else if (row == 8) {
         [self respringNow];
     }
 }
 - (void)switchToggled:(UISwitch *)sw {
-    NSString *key = ([sw tag] == 1001 ? @"Enablelddgifbg" : @"Enablezxhlddgifbg");
+    NSString *key = @"Enablelddgifbg";
     BOOL on = [sw isOn];
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithBool:on] forKey:key];
