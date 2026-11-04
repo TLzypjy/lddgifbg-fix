@@ -375,47 +375,45 @@ static void ApplyPos(void) {
 
 
 // ---------- 注入自检探针: 证明 dylib 已加载 / hook 已触发 ----------
-// 1.9.186: 探针文件超过 1.5MB 时截断保留尾部最新内容(10s 检查一次), 不再无限累计
+// 1.47: 探针文件按行数滚动裁剪 —— 超过 1000 行时保留最新 900 行(用户约定)
 // 纯 C 实现(本文件不引 Foundation 头)
+static int ProbeCountLines(const char *path) {
+    FILE *rf = fopen(path, "rb");
+    if (!rf) return 0;
+    char buf[65536];
+    size_t got;
+    int n = 0;
+    while ((got = fread(buf, 1, sizeof(buf), rf)) > 0) {
+        for (size_t i = 0; i < got; i++) if (buf[i] == '\n') n++;
+    }
+    fclose(rf);
+    return n;
+}
 static void ProbeWrite(const char *line) {
-    static double gProbeChk = 0;
-    double nwP = CFAbsoluteTimeGetCurrent();
-    if (nwP - gProbeChk > 10.0) {
-        gProbeChk = nwP;
-        const char *pp = "/var/mobile/lddgifbg/__plugin_probe__.txt";
-        FILE *rf = fopen(pp, "r");
+    static int sProbeLines = -1; // 进程内行数计数, 首次调用时数一遍现有文件
+    if (sProbeLines < 0) sProbeLines = ProbeCountLines("/var/mobile/lddgifbg/__plugin_probe__.txt");
+    if (++sProbeLines > 1000) {
+        sProbeLines = 900; // 保留最新 900 行
+        FILE *rf = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "rb");
         if (rf) {
             fseek(rf, 0, SEEK_END);
-            long end = ftell(rf);
-            long off = (end > 1048576) ? (end - 1048576) : 0;
-            fseek(rf, off, SEEK_SET);
-            if (off > 0) {
-                int c = fgetc(rf);
-                if (c != '\n' && c != EOF) {
-                    while ((c = fgetc(rf)) != '\n' && c != EOF) { }
-                }
-                if (c == EOF) { fclose(rf); rf = NULL; }
-            }
-            if (rf) {
-                long readLen = end - off;
-                if (readLen > 0 && readLen < (1 << 20)) {
-                    char *buf = (char *)malloc((size_t)readLen + 1);
-                    if (buf) {
-                        size_t got = fread(buf, 1, (size_t)readLen, rf);
-                        buf[got] = 0;
-                        fclose(rf);
-                        FILE *wf = fopen(pp, "w");
-                        if (wf) {
-                            fwrite(buf, 1, got, wf);
-                            fclose(wf);
-                        }
-                        free(buf);
-                        ProbeWrite("PROBE-TRUNCATED");
-                        return;
-                    }
-                }
+            long sz = ftell(rf);
+            fseek(rf, 0, SEEK_SET);
+            char *buf = (char *)malloc((size_t)sz + 1);
+            if (buf) {
+                size_t got = fread(buf, 1, (size_t)sz, rf);
                 fclose(rf);
-            }
+                long cut = 0;
+                int seen = 0;
+                for (long i = (long)got - 1; i >= 0; i--) {
+                    if (buf[i] == '\n') { seen++; if (seen >= 900) { cut = i + 1; break; } }
+                }
+                if (cut > 0) {
+                    FILE *wf = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "wb");
+                    if (wf) { fwrite(buf + cut, 1, got - (size_t)cut, wf); fclose(wf); }
+                }
+                free(buf);
+            } else { fclose(rf); }
         }
     }
     FILE *f = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "a");
@@ -1692,7 +1690,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.46");
+    ProbeWrite("LDD-BUILD v1.47");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
