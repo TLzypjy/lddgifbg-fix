@@ -494,7 +494,46 @@ static void LogB(const char *s) {
     if (f) { fprintf(f, "%s\n", s ? s : "?"); fflush(f); fclose(f); }
 }
 // 素材库布局探针: 写入用户可直接回传的 __plugin_probe__.txt (与主逻辑 ProbeWrite 同文件)
+// 1.47: 与主插件同款按行滚动裁剪 —— 超过 1000 行保留最新 900 行
+static int PwBCountLines(const char *path) {
+    FILE *rf = fopen(path, "rb");
+    if (!rf) return 0;
+    char buf[65536];
+    size_t got;
+    int n = 0;
+    while ((got = fread(buf, 1, sizeof(buf), rf)) > 0) {
+        for (size_t i = 0; i < got; i++) if (buf[i] == '\n') n++;
+    }
+    fclose(rf);
+    return n;
+}
 static void PwB(const char *s) {
+    static int sPwBLines = -1; // 进程内行数计数, 首次调用时数一遍现有文件
+    if (sPwBLines < 0) sPwBLines = PwBCountLines("/var/mobile/lddgifbg/__plugin_probe__.txt");
+    if (++sPwBLines > 1000) {
+        sPwBLines = 900; // 保留最新 900 行
+        FILE *rf = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "rb");
+        if (rf) {
+            fseek(rf, 0, SEEK_END);
+            long sz = ftell(rf);
+            fseek(rf, 0, SEEK_SET);
+            char *buf = (char *)malloc((size_t)sz + 1);
+            if (buf) {
+                size_t got = fread(buf, 1, (size_t)sz, rf);
+                fclose(rf);
+                long cut = 0;
+                int seen = 0;
+                for (long i = (long)got - 1; i >= 0; i--) {
+                    if (buf[i] == '\n') { seen++; if (seen >= 900) { cut = i + 1; break; } }
+                }
+                if (cut > 0) {
+                    FILE *wf = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "wb");
+                    if (wf) { fwrite(buf + cut, 1, got - (size_t)cut, wf); fclose(wf); }
+                }
+                free(buf);
+            } else { fclose(rf); }
+        }
+    }
     FILE *f = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "a");
     if (f) { fprintf(f, "%s\n", s ? s : "?"); fflush(f); fclose(f); }
 }
@@ -985,8 +1024,10 @@ static const char kLDDNameKey = 0;
             [cv setContentOffset:pt];
         }
         // 1.46: 恢复滚动; 若改名行顶部会被导航栏遮挡(第一/二排), 下移让整行露出。
+        // 1.47: _preKbdOY 先夹回 >=0 —— 上一次顶排露出留下的负偏移不能被当成"原位置"继承。
         double safeTop = [cv safeAreaInsets].top; // 导航栏+状态栏遮挡高度
         double target = _preKbdOY;
+        if (target < 0) target = 0;
         if (_activeCellTop >= 0 && target > _activeCellTop - safeTop) {
             target = _activeCellTop - safeTop; // 负偏移: 内容下移, 顶排完全露到导航栏下方
         }
@@ -1013,11 +1054,10 @@ static const char kLDDNameKey = 0;
         UICollectionView *cv = (UICollectionView *)_cv;
         CGPoint rp = [cv contentOffset];
         rp.y = _preKbdOY;
-        // 1.46: 顶排改名后下移让整行露出(与 kbdWillHide 一致)
+        // 1.47: _preKbdOY 先夹回 >=0, 且不再永久抬高 contentInset.top(1.46 的 inset 会让
+        // 下拉停在负偏移区回弹不回来, 顶部空隙粘住); 露出改用一次性负偏移, 用户一拖即回弹归位。
+        if (rp.y < 0) rp.y = 0;
         double safeTop = [cv safeAreaInsets].top;
-        UIEdgeInsets ins = [cv contentInset];
-        ins.top = safeTop;
-        [cv setContentInset:ins];
         if (_activeCellTop >= 0 && rp.y > _activeCellTop - safeTop) rp.y = _activeCellTop - safeTop;
         double minOff = -safeTop;
         if (rp.y < minOff) rp.y = minOff;
@@ -1466,7 +1506,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.46";
+    NSString *ver = @"1.47";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
