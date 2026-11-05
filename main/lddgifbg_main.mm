@@ -126,6 +126,8 @@ extern "C" { extern void *kCGImagePropertyGIFDictionary; extern void *kCGImagePr
 @end
 @interface NSDate : NSObject
 + (id)date;
++ (id)dateWithTimeIntervalSinceNow:(double)t;
+- (double)timeIntervalSinceNow;
 @end
 @interface NSURL : NSObject
 + (id)fileURLWithPath:(NSString *)p;
@@ -140,6 +142,8 @@ static void ProbeWrite(const char *line);
 // 1.9.133: 播放速度 (GIF 定时器间隔 / AVPlayer rate 共用)
 static double cSpeed = 1.0;
 static double gLastAppliedSpeed = 1.0;
+// 1.50: 横幅停留时长(秒), 0=系统默认 —— 批1移植灵动通知
+static double cStay = 0.0;
 static void ConsumeForcePreview(void);
 static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, y, w, h}; return r; }
 typedef struct UIEdgeInsets { double top, left, bottom, right; } UIEdgeInsets;
@@ -157,6 +161,9 @@ static void PreviewAutoClose(void);
 @interface NSTimer : NSObject
 + (id)scheduledTimerWithTimeInterval:(double)ti target:(id)t selector:(SEL)s userInfo:(id)u repeats:(BOOL)r;
 - (void)invalidate;
+- (NSDate *)fireDate;
+- (void)setFireDate:(NSDate *)d;
+- (double)timeInterval;
 @end
 @interface UIScreen : NSObject
 + (id)mainScreen;
@@ -759,6 +766,8 @@ static void RefreshPrefsCache(void) {
     cPosX = GetLddGifBgPos(gPrefsKeyPosX, 0.0);
     cPosY = GetLddGifBgPos(gPrefsKeyPosY, 0.0);
     cSpeed = GetLddGifBgSpeed();
+    // 1.50: 横幅停留时长 (0=系统默认, 3~15 秒)
+    { id v = LoadPrefsValue(@"lddgifbgStay"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 60) d = 0.0; cStay = d; }
     // 1.9.172: 素材目录扫描移出 0.5s 节流(原实现每 0.5s 扫目录=CPU元凶), 改为 SHOW-1 路径按 2s 缓存调用
     // 1.9.133: 速度变化即时生效 —— GIF 重启定时器, 视频更新 rate
     if (gLastAppliedSpeed != cSpeed) {
@@ -800,6 +809,30 @@ static id HookBNDInit(id self, SEL _c) {
     if (r && !gPresentLayer) ProbeWrite("BND-CAPTURED");
     if (r) gPresentLayer = r;
     return r;
+}
+// ---------- 1.50 批1: 横幅停留时长 (移植灵动通知) ----------
+// 系统用 dismissTimer 安排横幅自动收回; 钩 setDismissTimer: 在系统设置完后按用户
+// 时长(cStay 秒)改写 fireDate。cStay<=0.5 = 用户未启用, 原样放行零开销。
+static void (*origBNDSetDismissTimer)(id, SEL, id);
+static int gStayLog = 0;
+static void HookBNDSetDismissTimer(id self, SEL _c, id timer) {
+    origBNDSetDismissTimer(self, _c, timer);
+    if (cStay <= 0.5) return;
+    @try {
+        NSTimer *t = (NSTimer *)timer;
+        if (!t) return;
+        double remain = [(NSDate *)[t fireDate] timeIntervalSinceNow];
+        if (remain <= 0.1) return;
+        if (gStayLog < 20) {
+            gStayLog++;
+            char b[96];
+            snprintf(b, sizeof(b), "STAY-ARM remain=%.1f stay=%.1f", remain, cStay);
+            ProbeWrite(b);
+        }
+        [t setFireDate:[NSDate dateWithTimeIntervalSinceNow:cStay]];
+    } @catch (id e) {
+        if (gStayLog < 40) { gStayLog = 40; ProbeWrite("STAY-EXC"); }
+    }
 }
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
@@ -1690,7 +1723,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.49");
+    ProbeWrite("LDD-BUILD v1.50");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -1712,6 +1745,31 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
+    // 1.50 批1: 横幅停留时长 —— 钩 SBNotificationBannerDestination 的 setDismissTimer:,
+    // 系统设完定时器后按用户时长改写 fireDate (cStay<=0.5 视为默认, 不干预)。
+    {
+        id clsStay = objc_getClass("SBNotificationBannerDestination");
+        if (clsStay) {
+            Method sm = class_getInstanceMethod((Class)clsStay, sel_registerName("setDismissTimer:"));
+            if (sm) {
+                MSHookMessageEx((Class)clsStay, sel_registerName("setDismissTimer:"), (IMP)HookBNDSetDismissTimer, (IMP *)&origBNDSetDismissTimer);
+                ProbeWrite("STAY-HOOK-INSTALLED");
+            } else {
+                ProbeWrite("STAY-NO-SETTER");
+            }
+            // 1.50 批2预研: 打印横幅尺寸回调的真实类型编码 (下版按它挂钩做标准/紧凑/迷你样式)
+            Method pm = class_getInstanceMethod((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
+            if (pm) {
+                const char *te = method_getTypeEncoding(pm);
+                char b[220]; snprintf(b, sizeof(b), "SIZE-ENC %s", te ? te : "?");
+                ProbeWrite(b);
+            } else {
+                ProbeWrite("SIZE-ENC-MISSING");
+            }
+        } else {
+            ProbeWrite("STAY-NO-CLASS");
+        }
+    }
     static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
         PostRealNotification();
