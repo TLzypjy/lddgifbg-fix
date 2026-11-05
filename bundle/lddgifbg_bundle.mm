@@ -932,9 +932,10 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
         if (st == 1 || st == 2) { PwB("DL-NO-AUTH"); [self showTip:@"没有相册权限"]; return; }
         if (st == 0) {
-            void (^auth)(long) = ^{
+            void (^auth)(long) = ^(long ns) {
                 @try {
-                    [self doSaveToPhotos:mp lib:phLib req:phReq];
+                    if (ns == 3 || ns == 4) [self doSaveToPhotos:mp lib:phLib req:phReq];
+                    else [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO];
                 } @catch (id e) {
                     PwB("DL-AUTH-EXC");
                     [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO];
@@ -954,7 +955,7 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
 - (void)doSaveToPhotos:(NSString *)path lib:(Class)phLib req:(Class)phReq {
     id lib = ((id(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("sharedPhotoLibrary"));
     if (!lib) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
-    NSString *p = [path copy];
+    NSString *p = path; // 块捕获会自动持有, 无需显式 copy(存根工程未声明 NSString copy)
     void (^chg)(void) = ^{
         @try {
             NSURL *u = [NSURL fileURLWithPath:p];
