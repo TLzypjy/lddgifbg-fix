@@ -918,36 +918,65 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
     NSString *mp = LDDMediaFileInFolder(name);
     if (!mp) { [self showTip:@"找不到素材文件"]; return; }
     LogB("DL-TAPPED");
+    PwB("DL-TAPPED");
     @try {
         void *h = dlopen("/System/Library/Frameworks/Photos.framework/Photos", 2);
         Class phLib = h ? (Class)objc_getClass("PHPhotoLibrary") : nil;
         Class phReq = h ? (Class)objc_getClass("PHAssetChangeRequest") : nil;
-        if (!phLib || !phReq) { [self showTip:@"相册框架加载失败"]; return; }
+        if (!phLib || !phReq) { PwB("DL-NO-CLASS"); [self showTip:@"相册框架加载失败"]; return; }
+        // 1.54: 先核实选择器真实存在(1.53 崩溃 = PH 后台队列里未接住的异常, 先探后调)
+        BOOL hasReq = ((BOOL(*)(id, SEL, SEL))objc_msgSend)(phReq, sel_registerName("respondsToSelector:"), sel_registerName("creationRequestForAssetFromFileAtURL:"));
+        BOOL hasPerf = ((BOOL(*)(id, SEL, SEL))objc_msgSend)(phLib, sel_registerName("respondsToSelector:"), sel_registerName("performChanges:completionHandler:"));
+        { char bl[96]; snprintf(bl, sizeof(bl), "DL-CHECK req=%d perf=%d", hasReq ? 1 : 0, hasPerf ? 1 : 0); PwB(bl); }
+        if (!hasReq || !hasPerf) { [self showTip:@"系统不支持此保存方式"]; return; }
         long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
-        LogB("DL-AUTH");
-        if (st == 1 || st == 2) { [self showTip:@"没有相册权限"]; return; }
+        if (st == 1 || st == 2) { PwB("DL-NO-AUTH"); [self showTip:@"没有相册权限"]; return; }
         if (st == 0) {
-            void (^auth)(long) = ^(long ns) {
-                if (ns == 3 || ns == 4) [self doSaveToPhotos:mp lib:phLib req:phReq];
-                else [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO];
+            void (^auth)(long) = ^{
+                @try {
+                    [self doSaveToPhotos:mp lib:phLib req:phReq];
+                } @catch (id e) {
+                    PwB("DL-AUTH-EXC");
+                    [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO];
+                }
             };
             ((void(*)(Class, SEL, void (^)(long)))objc_msgSend)(phLib, sel_registerName("requestAuthorizationWithHandler:"), auth);
         } else {
             [self doSaveToPhotos:mp lib:phLib req:phReq];
         }
-    } @catch (id e) { [self showTip:@"保存异常"]; }
+    } @catch (id e) {
+        PwB("DL-OUTER-EXC");
+        [self showTip:@"保存异常"];
+    }
 }
+// 1.54: 保存链路整体后移进 block 内 try/catch —— PH 队列上的异常若无人接住会
+// std::terminate 直接闪退设置(Preferences .ips 实锤); 异常详情写探针。
 - (void)doSaveToPhotos:(NSString *)path lib:(Class)phLib req:(Class)phReq {
-    @try {
-        NSURL *u = [NSURL fileURLWithPath:path];
-        id lib = ((id(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("sharedPhotoLibrary"));
-        if (!lib) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
-        void (^chg)(void) = ^{ ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u); };
-        void (^done)(BOOL, id) = ^(BOOL ok, id err) {
+    id lib = ((id(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("sharedPhotoLibrary"));
+    if (!lib) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
+    NSString *p = [path copy];
+    void (^chg)(void) = ^{
+        @try {
+            NSURL *u = [NSURL fileURLWithPath:p];
+            ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u);
+            PwB("DL-REQ-MADE");
+        } @catch (id e) {
+            @try {
+                id r = ((id(*)(id, SEL))objc_msgSend)(e, sel_registerName("reason"));
+                const char *cs = r ? ((const char *(*)(id, SEL))objc_msgSend)(r, sel_registerName("UTF8String")) : "?";
+                char bl[320];
+                snprintf(bl, sizeof(bl), "DL-CHG-EXC %.280s", cs ? cs : "?");
+                PwB(bl);
+            } @catch (id e2) { PwB("DL-CHG-EXC"); }
+        }
+    };
+    void (^done)(BOOL, id) = ^(BOOL ok, id err) {
+        @try {
+            PwB(ok ? "DL-DONE-OK" : "DL-DONE-ERR");
             [self performSelectorOnMainThread:@selector(saveDone:) withObject:(ok ? @"1" : @"-1") waitUntilDone:NO];
-        };
-        ((void(*)(id, SEL, void (^)(), void (^)(BOOL, id)))objc_msgSend)(lib, sel_registerName("performChanges:completionHandler:"), chg, done);
-    } @catch (id e) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; }
+        } @catch (id e) { PwB("DL-DONE-EXC"); }
+    };
+    ((void(*)(id, SEL, void (^)(), void (^)(BOOL, id)))objc_msgSend)(lib, sel_registerName("performChanges:completionHandler:"), chg, done);
 }
 - (void)saveDone:(NSString *)r {
     if ([r isEqualToString:@"1"]) [self showTip:@"已保存到相册"];
@@ -1592,7 +1621,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.53";
+    NSString *ver = @"1.54";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
