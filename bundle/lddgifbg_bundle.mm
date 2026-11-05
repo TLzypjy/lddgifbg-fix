@@ -42,6 +42,7 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 - (id)valueForKey:(id)k;
 - (void)setValue:(id)v forKey:(id)k;
 - (void)performSelector:(SEL)s withObject:(id)o afterDelay:(double)d;
+- (void)performSelectorOnMainThread:(SEL)s withObject:(id)o waitUntilDone:(BOOL)w;
 @end
 @class NSArray;
 @class NSString;
@@ -893,6 +894,65 @@ static const char kLDDDelKey = 0;
     NSString *name = objc_getAssociatedObject(g, &kLDDDelKey);
     if (name) [self confirmDelete:name];
 }
+// ---------- 1.53: 编辑态下载素材到相册 ----------
+static const char kLDDDlKey = 0;
+// 目录 -> 媒体文件 (gif > 视频 > 图片, 与缩略图优先级一致)
+static NSString *LDDMediaFileInFolder(NSString *folderName) {
+    if (!folderName || ![folderName length]) return nil;
+    NSString *full = [@"/var/mobile/lddgifbg" stringByAppendingPathComponent:folderName];
+    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:full error:nil];
+    NSString *gif = nil, *vid = nil, *img = nil;
+    for (NSString *f in files) {
+        NSString *ext = [[f pathExtension] lowercaseString];
+        if (!gif && [ext isEqualToString:@"gif"]) gif = [full stringByAppendingPathComponent:f];
+        else if (!vid && ([ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"])) vid = [full stringByAppendingPathComponent:f];
+        else if (!img && ([ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])) img = [full stringByAppendingPathComponent:f];
+    }
+    if (gif) return gif;
+    if (vid) return vid;
+    return img;
+}
+- (void)downloadTapped:(id)sender {
+    NSString *name = objc_getAssociatedObject(sender, &kLDDDlKey);
+    if (!name) return;
+    NSString *mp = LDDMediaFileInFolder(name);
+    if (!mp) { [self showTip:@"找不到素材文件"]; return; }
+    LogB("DL-TAPPED");
+    @try {
+        void *h = dlopen("/System/Library/Frameworks/Photos.framework/Photos", 2);
+        Class phLib = h ? (Class)objc_getClass("PHPhotoLibrary") : nil;
+        Class phReq = h ? (Class)objc_getClass("PHAssetChangeRequest") : nil;
+        if (!phLib || !phReq) { [self showTip:@"相册框架加载失败"]; return; }
+        long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
+        LogB("DL-AUTH");
+        if (st == 1 || st == 2) { [self showTip:@"没有相册权限"]; return; }
+        if (st == 0) {
+            void (^auth)(long) = ^(long ns) {
+                if (ns == 3 || ns == 4) [self doSaveToPhotos:mp lib:phLib req:phReq];
+                else [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO];
+            };
+            ((void(*)(Class, SEL, void (^)(long)))objc_msgSend)(phLib, sel_registerName("requestAuthorizationWithHandler:"), auth);
+        } else {
+            [self doSaveToPhotos:mp lib:phLib req:phReq];
+        }
+    } @catch (id e) { [self showTip:@"保存异常"]; }
+}
+- (void)doSaveToPhotos:(NSString *)path lib:(Class)phLib req:(Class)phReq {
+    @try {
+        NSURL *u = [NSURL fileURLWithPath:path];
+        id lib = ((id(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("sharedPhotoLibrary"));
+        if (!lib) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
+        void (^chg)(void) = ^{ ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u); };
+        void (^done)(BOOL, id) = ^(BOOL ok, id err) {
+            [self performSelectorOnMainThread:@selector(saveDone:) withObject:(ok ? @"1" : @"-1") waitUntilDone:NO];
+        };
+        ((void(*)(id, SEL, void (^)(), void (^)(BOOL, id)))objc_msgSend)(lib, sel_registerName("performChanges:completionHandler:"), chg, done);
+    } @catch (id e) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; }
+}
+- (void)saveDone:(NSString *)r {
+    if ([r isEqualToString:@"1"]) [self showTip:@"已保存到相册"];
+    else [self showTip:@"保存失败"];
+}
 // 点名字 -> 行内改名
 static const char kLDDNameKey = 0;
 // 1.52 自用版: 按名字选中素材 (与点卡片选中完全一致)
@@ -1362,6 +1422,17 @@ static const char kLDDNameKey = 0;
         [delv addTarget:self action:@selector(delBtnTapped:) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:delv];
         objc_setAssociatedObject(delv, &kLDDDelKey, name, 1); // OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        // 1.53: 编辑态下载钮(黑底白"↓", 卡片右下角, 随卡片一起抖动) -> 把素材保存到相册
+        UIButton *dlv = [[UIButton alloc] initWithFrame:MakeRect(cardW - 30, imgH - 30, 24, 24)];
+        [dlv setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.55]];
+        [[dlv layer] setCornerRadius:12.0];
+        [[dlv layer] setMasksToBounds:YES];
+        [dlv setTitle:@"↓" forState:0];
+        [dlv setTitleColor:[UIColor whiteColor] forState:0];
+        [dlv setFont:[UIFont boldSystemFontOfSize:14.0]];
+        [dlv addTarget:self action:@selector(downloadTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [card addSubview:dlv];
+        objc_setAssociatedObject(dlv, &kLDDDlKey, name, 1);
     }
     [[cell contentView] addSubview:card];
     // 名字胶囊 (点按 -> 行内改名); 1.9.201: x=10 与卡片(x=6,宽cardW)水平居中对齐 —— 用户反馈胶囊偏左
@@ -1521,7 +1592,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.52";
+    NSString *ver = @"1.53";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
