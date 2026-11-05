@@ -1750,7 +1750,7 @@ static void LDDInit(void) {
     {
         id clsStay = objc_getClass("SBNotificationBannerDestination");
         if (clsStay) {
-            Method sm = class_getInstanceMethod((Class)clsStay, sel_registerName("setDismissTimer:"));
+            void *sm = class_getInstanceMethod((Class)clsStay, sel_registerName("setDismissTimer:"));
             if (sm) {
                 MSHookMessageEx((Class)clsStay, sel_registerName("setDismissTimer:"), (IMP)HookBNDSetDismissTimer, (IMP *)&origBNDSetDismissTimer);
                 ProbeWrite("STAY-HOOK-INSTALLED");
@@ -1758,7 +1758,7 @@ static void LDDInit(void) {
                 ProbeWrite("STAY-NO-SETTER");
             }
             // 1.50 批2预研: 打印横幅尺寸回调的真实类型编码 (下版按它挂钩做标准/紧凑/迷你样式)
-            Method pm = class_getInstanceMethod((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
+            void *pm = class_getInstanceMethod((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
             if (pm) {
                 const char *te = method_getTypeEncoding(pm);
                 char b[220]; snprintf(b, sizeof(b), "SIZE-ENC %s", te ? te : "?");
