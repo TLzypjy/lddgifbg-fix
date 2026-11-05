@@ -868,9 +868,13 @@ static BOOL LDDStayGate(double *delayOut) {
     *delayOut = cStay - elapsed;
     return YES;
 }
+// 1.51: 本文件不引 dispatch 头, 手动声明 (队列符号 _dispatch_main_q 文件里已在用)
+extern "C" long dispatch_time(long when, long long delta);
+extern "C" void dispatch_after(long when, void *queue, void (^block)(void));
+extern char _dispatch_main_q;
 static void LDDStaySchedule(double delay, void (^callOrig)(void)) {
     double snapTs = gWideShownTs;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * 1000000000.0)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(0L, (long long)(delay * 1000000000.0)), (void *)&_dispatch_main_q, ^{
         if (gWideShownTs == snapTs) callOrig(); // 期间来了新横幅则放弃这次代收
     });
 }
