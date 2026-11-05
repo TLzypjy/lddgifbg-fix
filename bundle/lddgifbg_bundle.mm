@@ -475,7 +475,7 @@ static void WritePrefsFile(NSString *key, id value) {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     // 底: NSUserDefaults 全键 (面板写过的一定在)
     NSUserDefaults *ud0 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"lddgifbgStay", @"lddgifbgStyle", @"lddgifbgStyleW", @"lddgifbgStyleH", @"SelectedMaterialFolder", nil]) {
+    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"SelectedMaterialFolder", nil]) {
         id v = [ud0 objectForKey:k];
         if (v) [d setObject:v forKey:k];
     }
@@ -895,6 +895,24 @@ static const char kLDDDelKey = 0;
 }
 // 点名字 -> 行内改名
 static const char kLDDNameKey = 0;
+// 1.52 自用版: 按名字选中素材 (与点卡片选中完全一致)
+- (void)selectMaterialNamed:(NSString *)name {
+    if (!name || _editMode) return;
+    if (!_folders) return;
+    for (NSUInteger i = 0; i < [_folders count]; i++) {
+        NSString *n = [_folders objectAtIndex:i];
+        if ([n isEqualToString:name]) {
+            _sel = name;
+            NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            [ud setObject:name forKey:@"SelectedMaterialFolder"];
+            [ud synchronize];
+            WritePrefsFile(@"SelectedMaterialFolder", name);
+            [(UICollectionView *)_cv reloadData];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"LDDMatChanged" object:0];
+            return;
+        }
+    }
+}
 - (void)nameTapped:(UITapGestureRecognizer *)g {
     NSString *name = objc_getAssociatedObject(g, &kLDDNameKey);
     if (!name) return;
@@ -902,6 +920,8 @@ static const char kLDDNameKey = 0;
     id contentV = [pill superview];  // contentView
     id cell = [contentV superview];  // cell
     if (!cell) return;
+    // 1.52 自用版: 只有抖动编辑模式才能改名; 未进编辑模式点名字 = 选中该素材
+    if (!_editMode) { [self selectMaterialNamed:name]; return; }
     [self beginRename:name inCell:cell atPill:pill];
 }
 - (void)beginRename:(NSString *)name inCell:(id)cell atPill:(id)pill {
@@ -1445,15 +1465,9 @@ static const char kLDDNameKey = 0;
 - (NSInteger)numberOfSectionsInTableView:(id)tv { return 1; }
 // 1.9.140: 行数 10 (0/1开关 2预览 3水平偏移 4垂直偏移 5速度 6选素材 7跳转 8预览通知 9注销)
 // 1.9.184: 行数 10 (版本/作者 移除, 改底部居中版权 footer)
-// 1.51: 行数 13 (0开关 1预览 2水平 3垂直 4速度 5横幅样式 6样式宽 7样式高 8选素材 9跳转 10预览通知 11横幅停留 12注销)
-- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 13; }
-// 1.51: 横幅样式名 (0标准 1紧凑 2迷你 3自定义)
-static NSString *LDDStyleName(long s) {
-    if (s == 1) return @"紧凑";
-    if (s == 2) return @"迷你";
-    if (s == 3) return @"自定义";
-    return @"标准";
-}
+// 1.52 自用版: 行数 9 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
+// 1.50/1.51 的横幅样式/停留时长行已随崩溃钩子一并移除(见 main.mm 注释)
+- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 9; }
 // 1.9.156: 输入框预填值去小数 (偏移=整数, 速度=去尾零保留1位)
 static NSString *LDDInputNum(double v, BOOL isSpeed) {
     if (!isSpeed) return [NSString stringWithFormat:@"%.0f", v];
@@ -1507,7 +1521,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.51";
+    NSString *ver = @"1.52";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1677,107 +1691,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
-    } else if (row == 5) {
-        // 1.51: 横幅样式 (点击循环 标准→紧凑→迷你→自定义)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 120, 22)];
-        [label setText:@"横幅样式"];
-        [label setFont:[UIFont systemFontOfSize:16.0]];
-        [[cell contentView] addSubview:label];
-        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 110, 19, 94, 22)];
-        [vv setTextAlignment:2];
-        [vv setFont:[UIFont systemFontOfSize:14.0]];
-        [vv setTextColor:[UIColor colorWithRed:0.0 green:0.45 blue:1.0 alpha:1.0]];
-        [vv setTag:2029];
-        NSUserDefaults *uds = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id sv = [uds objectForKey:@"lddgifbgStyle"];
-        long st = sv ? (long)[sv doubleValue] : 0;
-        [vv setText:LDDStyleName(st)];
-        [[cell contentView] addSubview:vv];
-        [cell setSelectionStyle:1];
-    } else if (row == 6) {
-        // 1.51: 样式宽度 (仅自定义样式生效, 40~120%)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
-        [label setText:@"样式宽度"];
-        [label setFont:[UIFont systemFontOfSize:15.0]];
-        [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
-        [sl setMinimumValue:40];
-        [sl setMaximumValue:120];
-        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:@"lddgifbgStyleW"];
-        double dv = v ? [v doubleValue] : 100.0;
-        if (dv < 40 || dv > 120) dv = 100;
-        [sl setValue:dv];
-        [sl setTag:3009];
-        [sl addTarget:self action:@selector(styleWChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
-        [[cell contentView] addSubview:sl];
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setTag:2027];
-        [vl setText:[NSString stringWithFormat:@"%.0f%%", dv]];
-        [vl setUserInteractionEnabled:YES];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
-        [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
-    } else if (row == 7) {
-        // 1.51: 样式高度 (仅自定义样式生效, 40~120%)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
-        [label setText:@"样式高度"];
-        [label setFont:[UIFont systemFontOfSize:15.0]];
-        [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
-        [sl setMinimumValue:40];
-        [sl setMaximumValue:120];
-        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:@"lddgifbgStyleH"];
-        double dv = v ? [v doubleValue] : 100.0;
-        if (dv < 40 || dv > 120) dv = 100;
-        [sl setValue:dv];
-        [sl setTag:3010];
-        [sl addTarget:self action:@selector(styleHChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
-        [[cell contentView] addSubview:sl];
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setTag:2028];
-        [vl setText:[NSString stringWithFormat:@"%.0f%%", dv]];
-        [vl setUserInteractionEnabled:YES];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
-        [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
-    } else if (row == 11) {
-        // 1.50: 横幅停留时长 (移植灵动通知) 0=系统默认, 3~15 秒
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
-        [label setText:@"横幅停留时长"];
-        [label setFont:[UIFont systemFontOfSize:15.0]];
-        [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
-        [sl setMinimumValue:0];
-        [sl setMaximumValue:15];
-        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:@"lddgifbgStay"];
-        double dv = v ? [v doubleValue] : 0.0;
-        if (dv < 0 || dv > 15) dv = 0;
-        [sl setValue:dv];
-        [sl setTag:3008];
-        [sl addTarget:self action:@selector(stayChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
-        [[cell contentView] addSubview:sl];
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setTag:2026];
-        [vl setText:(dv <= 0.5 ? @"默认" : [NSString stringWithFormat:@"%.0f秒", dv])];
-        [vl setUserInteractionEnabled:YES];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
-        [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
     } else {
-        NSString *t = (row == 8 ? @"选择素材" : (row == 9 ? @"跳转素材目录" : (row == 10 ? @"预览通知" : @"立即注销")));
+        NSString *t = (row == 5 ? @"选择素材" : (row == 6 ? @"跳转素材目录" : (row == 7 ? @"预览通知" : @"立即注销")));
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:16.0]];
-        if (row == 12) [label setTextColor:[UIColor redColor]];
+        if (row == 8) [label setTextColor:[UIColor redColor]];
         [[cell contentView] addSubview:label];
         [cell setSelectionStyle:1];
     }
@@ -1786,19 +1705,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
-    // 1.51: 行号与 UI 同步 (0开关 1预览 2水平 3垂直 4速度 5横幅样式 6样式宽 7样式高 8选素材 9跳转 10预览通知 11横幅停留 12注销)
+    // 1.52 自用版: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
     if (row == 5) {
-        // 1.51: 循环切换横幅样式
-        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:@"lddgifbgStyle"];
-        long s = v ? (long)[v doubleValue] : 0;
-        s = (s + 1) % 4;
-        [ud setObject:[NSNumber numberWithDouble:(double)s] forKey:@"lddgifbgStyle"];
-        [ud synchronize];
-        WritePrefsFile(@"lddgifbgStyle", [NSNumber numberWithDouble:(double)s]);
-        id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
-        if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDStyleName(s)]; }
-    } else if (row == 8) {
         // 1.48: 素材库改为推入式第二设置页(从右滑入, 系统 nav bar 原生返回), 不再用底部弹出 sheet;
         // 无导航栈时回退模态呈现。
         LDDMaterialPickerController *pc = [[LDDMaterialPickerController alloc] init];
@@ -1809,7 +1717,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pc];
             [self presentViewController:nav animated:YES completion:0];
         }
-    } else if (row == 9) {
+    } else if (row == 6) {
         UIApplication *app = [UIApplication sharedApplication];
         NSURL *fz = [NSURL URLWithString:@"filza://view/var/mobile/lddgifbg"];
         [app openURL:fz options:[NSDictionary dictionary] completionHandler:^(BOOL ok){
@@ -1818,9 +1726,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
                 [app openURL:url options:[NSDictionary dictionary] completionHandler:0];
             }
         }];
-    } else if (row == 10) {
+    } else if (row == 7) {
         [self showBannerPreview];
-    } else if (row == 12) {
+    } else if (row == 8) {
         [self respringNow];
     }
 }
@@ -1873,47 +1781,18 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     id cv = [sl superview];
     if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2025]; if (vl) [vl setText:[NSString stringWithFormat:@"%.1fx", dv]]; }
 }
-// 1.50: 横幅停留时长 (秒, 0=系统默认)
-- (void)stayChanged:(UISlider *)sl {
-    double dv = [sl value];
-    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgStay"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgStay", [NSNumber numberWithDouble:dv]);
-    id cv = [sl superview];
-    if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2026]; if (vl) [vl setText:(dv <= 0.5 ? @"默认" : [NSString stringWithFormat:@"%.0f秒", dv])]; }
-}
-// 1.51: 样式宽度 (%, 仅自定义样式生效)
-- (void)styleWChanged:(UISlider *)sl {
-    double dv = [sl value];
-    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgStyleW"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgStyleW", [NSNumber numberWithDouble:dv]);
-    id cv = [sl superview];
-    if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2027]; if (vl) [vl setText:[NSString stringWithFormat:@"%.0f%%", dv]]; }
-}
-// 1.51: 样式高度 (%, 仅自定义样式生效)
-- (void)styleHChanged:(UISlider *)sl {
-    double dv = [sl value];
-    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgStyleH"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgStyleH", [NSNumber numberWithDouble:dv]);
-    id cv = [sl superview];
-    if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2028]; if (vl) [vl setText:[NSString stringWithFormat:@"%.0f%%", dv]]; }
-}
+// 1.52 自用版: 横幅停留/样式滑条已随钩子回滚一并移除
 // 1.9.153: 点击数值 -> 弹输入框自定义填入, 同步滑块/预览/prefs
 - (void)valTapped:(UITapGestureRecognizer *)g {
     id vl = [g view];
     NSInteger tag = [vl tag];
-    if (tag != 2023 && tag != 2024 && tag != 2025 && tag != 2026 && tag != 2027 && tag != 2028) return;
+    if (tag != 2023 && tag != 2024 && tag != 2025) return;
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : (tag == 2025 ? @"lddgifbgSpeed" : (tag == 2026 ? @"lddgifbgStay" : (tag == 2027 ? @"lddgifbgStyleW" : @"lddgifbgStyleH")))));
+    NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : @"lddgifbgSpeed"));
     id cur = [ud objectForKey:key];
     double dv = cur ? [cur doubleValue] : 0.0;
-    NSString *title = (tag == 2023 ? @"水平偏移数值" : (tag == 2024 ? @"垂直偏移数值" : (tag == 2025 ? @"播放速度数值" : (tag == 2026 ? @"横幅停留时长" : (tag == 2027 ? @"样式宽度" : @"样式高度")))));
-    NSString *hint = (tag == 2025 ? @"输入 0.5 ~ 3.0 倍速" : (tag == 2026 ? @"输入 0 ~ 15 秒 (0=系统默认)" : (tag == 2027 || tag == 2028 ? @"输入 40 ~ 120 (%)" : @"输入 -200 ~ 200")));
+    NSString *title = (tag == 2023 ? @"水平偏移数值" : (tag == 2024 ? @"垂直偏移数值" : @"播放速度数值"));
+    NSString *hint = (tag == 2025 ? @"输入 0.5 ~ 3.0 倍速" : @"输入 -200 ~ 200");
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:title message:hint preferredStyle:1];   // 1.9.154: 必须 Alert(1), ActionSheet(0) 不允许加输入框会崩
     [ac addTextFieldWithConfigurationHandler:^(UITextField *tf){
         [tf setKeyboardType:4];
@@ -1927,12 +1806,6 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         if (tag == 2025) {
             if (nv < 0.5) nv = 0.5;
             if (nv > 3.0) nv = 3.0;
-        } else if (tag == 2026) {
-            if (nv < 0) nv = 0;
-            if (nv > 15) nv = 15;
-        } else if (tag == 2027 || tag == 2028) {
-            if (nv < 40) nv = 40;
-            if (nv > 120) nv = 120;
         } else {
             if (nv < -200) nv = -200;
             if (nv > 200) nv = 200;
@@ -1943,13 +1816,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         // 同步滑块
         id cv = [vl superview];
         if (cv) {
-            UISlider *sl = (UISlider *)[cv viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : (tag == 2025 ? 3005 : (tag == 2026 ? 3008 : (tag == 2027 ? 3009 : 3010)))))];
+            UISlider *sl = (UISlider *)[cv viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))];
             if (sl) [sl setValue:nv];
         }
         // 更新数值显示
         if (tag == 2025) [(UILabel *)vl setText:[NSString stringWithFormat:@"%.1fx", nv]];
-        else if (tag == 2026) [(UILabel *)vl setText:(nv <= 0.5 ? @"默认" : [NSString stringWithFormat:@"%.0f秒", nv])];
-        else if (tag == 2027 || tag == 2028) [(UILabel *)vl setText:[NSString stringWithFormat:@"%.0f%%", nv]];
         else [(UILabel *)vl setText:[NSString stringWithFormat:@"%.0f", nv]];
         // 偏移输入后刷新预览
         if (tag == 2023 || tag == 2024) LDDUpdatePreview();
