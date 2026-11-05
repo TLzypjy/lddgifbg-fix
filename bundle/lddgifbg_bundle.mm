@@ -984,6 +984,10 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
 }
 // 点名字 -> 行内改名
 static const char kLDDNameKey = 0;
+// 1.55: 广播素材变更到 SpringBoard (立即作废素材缓存, 新素材下一次来通知马上生效)
+static void LDDNotifyMatChanged(void) {
+    notify_post("com.tlzypjy.github/MatChanged");
+}
 // 1.52 自用版: 按名字选中素材 (与点卡片选中完全一致)
 - (void)selectMaterialNamed:(NSString *)name {
     if (!name || _editMode) return;
@@ -998,6 +1002,7 @@ static const char kLDDNameKey = 0;
             WritePrefsFile(@"SelectedMaterialFolder", name);
             [(UICollectionView *)_cv reloadData];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"LDDMatChanged" object:0];
+            LDDNotifyMatChanged();
             return;
         }
     }
@@ -1202,6 +1207,7 @@ static const char kLDDNameKey = 0;
             [ud setObject:newName forKey:@"SelectedMaterialFolder"];
         }
         [[NSNotificationCenter defaultCenter] postNotificationName:@"LDDMatChanged" object:0];
+        LDDNotifyMatChanged();
     } else {
         [self showTip:@"改名失败"];
     }
@@ -1223,6 +1229,7 @@ static const char kLDDNameKey = 0;
                 NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
                 [ud removeObjectForKey:@"SelectedMaterialFolder"];
             }
+            LDDNotifyMatChanged();
         } else {
             [self showTip:@"删除失败"];
         }
@@ -1574,19 +1581,12 @@ static NSString *LDDInputNum(double v, BOOL isSpeed) {
     if (v == (double)(long long)v) return [NSString stringWithFormat:@"%.0f", v];
     return [NSString stringWithFormat:@"%.1f", v];
 }
-// 1.9.146: 预览尺寸 (真实岛比例 + 面板宽缩放), heightForRow/cellForRow 共用
+// 1.9.146: 预览尺寸, heightForRow/cellForRow 共用
+// 1.55 自用版: 预览改为永久固定尺寸(撑满宽 x 固定 92pt) —— 不再跟随 __island_size__
+// 上下跳动(旧逻辑高度取决于最近一次岛的形态, 音乐条/通知横幅来回切就变大变小)
 static void LDDPreviewSize(double bw, double *piw, double *pih) {
-    // 1.9.163: 宽度一律撑满面板, 高度按岛真实比例等比 —— 小尺寸广播不再导致预览缩成小药丸
-    double iw = bw, ih = 100;
-    NSString *isz = [NSString stringWithContentsOfFile:@"/var/mobile/lddgifbg/__island_size__" encoding:4 error:0];
-    if (isz) {
-        NSArray *parts = [isz componentsSeparatedByString:@" "];
-        if ([parts count] >= 2) {
-            double w2 = [[parts objectAtIndex:0] doubleValue], h2 = [[parts objectAtIndex:1] doubleValue];
-            if (w2 >= 200 && h2 >= 40 && w2 > 0) { ih = h2 * (bw / w2); } // 撑满宽, 等比高
-        }
-    }
-    *piw = iw; *pih = ih;
+    *piw = bw;
+    *pih = 92.0;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     if ([ip row] == 1) {
@@ -1621,7 +1621,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.54";
+    NSString *ver = @"1.55";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
