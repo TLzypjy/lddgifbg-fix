@@ -1,5 +1,5 @@
 // 灵动岛背景美化 —— 重制版设置 Bundle (v3: 全标准 ObjC 语法, 适配 arm64e)
-// 架构: 入口壳(PSListController) -> 模态面板(UITableViewController 自绘) -> 素材选择器(模态)
+// 架构: 入口壳(PSListController 自绘 9 行) -> 素材选择器(1.48: 推入式第二设置页, 模态兜底)
 // 关键: 全部使用 [obj method:] 标准语法, 由编译器生成 arm64e 正确的 objc_msgSend
 #include <stdio.h>
 #include <time.h>
@@ -343,6 +343,7 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (void)presentViewController:(id)vc animated:(BOOL)a completion:(id)c;
 - (void)dismissViewControllerAnimated:(BOOL)a completion:(id)c;
 - (id)presentingViewController;
+- (id)navigationController;
 @end
 @interface UITableViewController : UIViewController
 - (id)initWithStyle:(NSInteger)style;
@@ -352,6 +353,7 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (id)initWithRootViewController:(id)rvc;
 - (void)pushViewController:(id)vc animated:(BOOL)a;
 - (void)popViewControllerAnimated:(BOOL)a;
+- (id)viewControllers;
 @end
 @interface NSDate : NSObject
 + (id)date;
@@ -822,7 +824,13 @@ static id LDDListMaterialFolders(void) {
     } @catch (id e) { LogB("MAT-RELAYOUT-EXC"); }
 }
 - (void)closeTapped {
-    [self dismissViewControllerAnimated:YES completion:0];
+    // 1.48: 推入式页面 -> 出栈返回; 模态兜底 -> dismiss。
+    UINavigationController *nc = [self navigationController];
+    if (nc && [[nc viewControllers] count] > 1) {
+        [nc popViewControllerAnimated:YES];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:0];
+    }
 }
 // 1.9.191: 长按缩略图 -> 进入编辑态(全网格抖动 + 红-删除钮), 点名字 -> 行内改名 (同 cc 播放器素材库交互)
 - (void)longPressTapped:(id)lp {
@@ -1507,7 +1515,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.47";
+    NSString *ver = @"1.48";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1693,9 +1701,16 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
     // 1.42: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
     if (row == 5) {
+        // 1.48: 素材库改为推入式第二设置页(从右滑入, 系统 nav bar 原生返回), 不再用底部弹出 sheet;
+        // 无导航栈时回退模态呈现。
         LDDMaterialPickerController *pc = [[LDDMaterialPickerController alloc] init];
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pc];
-        [self presentViewController:nav animated:YES completion:0];
+        UINavigationController *nc = [self navigationController];
+        if (nc && [[nc viewControllers] count] > 0) {
+            [nc pushViewController:pc animated:YES];
+        } else {
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pc];
+            [self presentViewController:nav animated:YES completion:0];
+        }
     } else if (row == 6) {
         UIApplication *app = [UIApplication sharedApplication];
         NSURL *fz = [NSURL URLWithString:@"filza://view/var/mobile/lddgifbg"];
