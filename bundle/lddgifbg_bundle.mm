@@ -730,7 +730,6 @@ static id LDDListMaterialFolders(void) {
     id _activeField;
     NSString *_activeName;
     id _activeCell;
-    double _activeCellTop; // 1.46: 正在改名的 cell 内容区顶部 y(判顶排是否被导航栏遮挡)
     double _preKbdOY;   // 1.9.206: beginRename 前的 contentOffset.y, 改名结束恢复滚动
     id _activeLabel; // 1.9.192: 行内改名中被隐藏的名字 label, 结束时恢复显示
     id _activeIp;    // 1.9.201: 正在改名的 cell 的 indexpath, 键盘弹出时滚动到可视区
@@ -738,7 +737,6 @@ static id LDDListMaterialFolders(void) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    _activeCellTop = -1;
     [self setTitle:@"素材库"];
     UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:0 target:self action:@selector(closeTapped)];
     [[self navigationItem] setLeftBarButtonItem:close];
@@ -906,9 +904,7 @@ static const char kLDDNameKey = 0;
     [self beginRename:name inCell:cell atPill:pill];
 }
 - (void)beginRename:(NSString *)name inCell:(id)cell atPill:(id)pill {
-    _activeCellTop = [(UIView *)cell frame].oy; // 1.46: 记录改名行内容区顶部 y
-
-        if (_activeField) [_activeField resignFirstResponder]; // 先结束上一次未完成的编辑
+    if (_activeField) [_activeField resignFirstResponder]; // 先结束上一次未完成的编辑
     id lab = [pill viewWithTag:922]; // 名字文字 label
     CGRect lf = [pill frame];
     if (lab) [lab setHidden:YES];
@@ -945,7 +941,8 @@ static const char kLDDNameKey = 0;
     UIEdgeInsets ins = [cv contentInset];
     // 让改名行的底缘(再留 46pt 圆点空间)落在键盘上沿之上
     double want = fr.oy + fr.h + 46.0 - (cvb.h - kbH);
-    if (want < 0) want = 0;
+    double st = [cv safeAreaInsets].top;
+    if (want < -st) want = -st; // 1.49: 允许滚到自然顶点(内容顶到导航栏下沿), 不再钳到 0
     CGSize csz = [cv contentSize];
     double maxOff = csz.h + ins.bottom - cvb.h;
     if (maxOff < 0) maxOff = 0;
@@ -957,6 +954,21 @@ static const char kLDDNameKey = 0;
     UIEdgeInsets ins = [cv contentInset];
     ins.bottom = kbH + 8.0;
     [cv setContentInset:ins];
+}
+// 1.49: 统一把目标偏移夹回当前合法范围。
+// 卡死根因(1.44~1.48 反复复发): 滚动视图默认 contentInsetAdjustmentBehavior=automatic,
+// 顶部安全区(导航栏)本身就允许负偏移 —— 自然顶点 = -safeArea.top, 且素材一屏放得下时
+// 那是唯一合法偏移; 旧恢复逻辑把目标钳到 >=0, 恰好比合法范围高出 safeTop, 偏移停在
+// 越界区, 列表表现为"卡住滑动不了"。恢复目标一律经此函数, 不再手写各处 min/max。
+- (double)clampOffsetY:(double)y {
+    UICollectionView *cv = (UICollectionView *)_cv;
+    CGSize csz = [cv contentSize];
+    double minOff = -[cv safeAreaInsets].top;
+    double maxOff = csz.h - [cv bounds].h;
+    if (maxOff < minOff) maxOff = minOff; // 内容不满一屏: 只能停在自然顶点
+    if (y < minOff) y = minOff;
+    if (y > maxOff) y = maxOff;
+    return y;
 }
 - (void)kbdWillShow:(id)n {
     if (!_activeIp) { PwB("KBD-NO-IP"); return; }
@@ -1014,38 +1026,21 @@ static const char kLDDNameKey = 0;
         PwB("KBD-DIDSHOW-OK");
     } @catch (id e) { PwB("KBD-DIDSHOW-EXC"); }
 }
-// 1.44: 键盘收回 -> 撤掉底部插边, 并把滚动位置夹回有效范围 + 恢复到改名前位置。
-// 1.43 教训: 只撤插边不夹偏移, 偏移停在插边撑出的越界区里, 列表表现为"卡住不能滚"。
+// 1.44: 键盘收回 -> 撤掉底部插边, 并把滚动位置恢复到改名前位置。
+// 1.49: 恢复目标统一走 clampOffsetY(自然顶点 = -safeArea.top), 顶排露出特判已删 ——
+// 推入式页面在自然顶点时第一排本来就完整可见, 1.46/1.47 的下移补偿不再需要。
 - (void)kbdWillHide:(id)n {
     @try {
         UICollectionView *cv = (UICollectionView *)_cv;
-        // 先撤插边
+        // 撤掉底部插边
         UIEdgeInsets ins = [cv contentInset];
         ins.bottom = 0;
         [cv setContentInset:ins];
-        // 夹回有效范围
-        CGSize csz = [cv contentSize];
-        CGPoint pt = [cv contentOffset];
-        double maxOff = csz.h - [cv bounds].h;
-        if (maxOff < 0) maxOff = 0;
-        if (pt.y > maxOff) {
-            pt.y = maxOff;
-            [cv setContentOffset:pt];
-        }
-        // 1.46: 恢复滚动; 若改名行顶部会被导航栏遮挡(第一/二排), 下移让整行露出。
-        // 1.47: _preKbdOY 先夹回 >=0 —— 上一次顶排露出留下的负偏移不能被当成"原位置"继承。
-        double safeTop = [cv safeAreaInsets].top; // 导航栏+状态栏遮挡高度
-        double target = _preKbdOY;
-        if (target < 0) target = 0;
-        if (_activeCellTop >= 0 && target > _activeCellTop - safeTop) {
-            target = _activeCellTop - safeTop; // 负偏移: 内容下移, 顶排完全露到导航栏下方
-        }
-        double minOff = -safeTop;
-        if (target < minOff) target = minOff;
-        if (target > maxOff) target = maxOff;
-        CGPoint rp = pt; rp.y = target;
+        double target = [self clampOffsetY:_preKbdOY];
+        CGPoint rp = [cv contentOffset];
+        rp.y = target;
         [cv setContentOffset:rp animated:NO];
-        { char kb[160]; snprintf(kb, sizeof(kb), "KBD-HIDE-target%.0f-safe%.0f-cell%.0f", target, safeTop, _activeCellTop); PwB(kb); }
+        { char kb[160]; snprintf(kb, sizeof(kb), "KBD-HIDE-target%.0f", target); PwB(kb); }
         PwB("KBD-HIDE-INSET");
     } @catch (id e) { PwB("KBD-HIDE-EXC"); }
 }
@@ -1059,25 +1054,13 @@ static const char kLDDNameKey = 0;
     NSString *nn = [tf text];
     [tf removeFromSuperview];
     // 1.9.206: 改名结束恢复滚动位置(用户: 改完名字预览图不会自己滚下来, 一直停在上边)
+    // 1.49: 恢复目标统一走 clampOffsetY(自然顶点 = -safeArea.top)。
     @try {
         UICollectionView *cv = (UICollectionView *)_cv;
         CGPoint rp = [cv contentOffset];
-        rp.y = _preKbdOY;
-        // 1.47: _preKbdOY 先夹回 >=0, 且不再永久抬高 contentInset.top(1.46 的 inset 会让
-        // 下拉停在负偏移区回弹不回来, 顶部空隙粘住); 露出改用一次性负偏移, 用户一拖即回弹归位。
-        if (rp.y < 0) rp.y = 0;
-        double safeTop = [cv safeAreaInsets].top;
-        if (_activeCellTop >= 0 && rp.y > _activeCellTop - safeTop) rp.y = _activeCellTop - safeTop;
-        double minOff = -safeTop;
-        if (rp.y < minOff) rp.y = minOff;
-        CGSize csz = [cv contentSize];
-        double maxOff = csz.h - [cv bounds].h;
-        if (maxOff < 0) maxOff = 0;
-        if (rp.y > maxOff) rp.y = maxOff;
+        rp.y = [self clampOffsetY:_preKbdOY];
         [cv setContentOffset:rp animated:YES];
-        { char kb[160]; snprintf(kb, sizeof(kb), "KBD-END-target%.0f-safe%.0f-cell%.0f", rp.y, safeTop, _activeCellTop); PwB(kb); }
-        char kb[128]; snprintf(kb, sizeof(kb), "KBD-RESTORE-y%.0f", rp.y);
-        PwB(kb);
+        { char kb[128]; snprintf(kb, sizeof(kb), "KBD-END-target%.0f", rp.y); PwB(kb); }
     } @catch (id e) { }
     _activeField = nil;
     _activeName = nil;
@@ -1515,7 +1498,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.48";
+    NSString *ver = @"1.49";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
