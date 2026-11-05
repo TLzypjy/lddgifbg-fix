@@ -426,6 +426,11 @@ static void ProbeWrite(const char *line) {
 }
 
 // ---------- 素材选择: gif > 视频 > 静态图 ----------
+// 1.55: 素材路径缓存提到文件域 —— 设置页切换素材后经 Darwin 通知置 gMatChangedFlag,
+// 立即作废缓存重新扫描, 新素材"来通知立马生效"(不再等 2 秒缓存自然过期)
+static NSString *gPickCache = nil;
+static double gPickCacheTs = 0;
+static int gMatChangedFlag = 0;
 static NSString *GetSelectedImagePath(void) {
     id name = LoadPrefsValue(gPrefsKeyFolder);
     if (!name) return nil;
@@ -1048,17 +1053,17 @@ static void LDDIslandLayout(id self) {
         gVideoStopTs = 0;
     }
     // 1.9.172: 素材路径 2 秒缓存 —— GetSelectedImagePath 内部扫目录(文件IO), 由原 0.5s 节流每帧级降到 2 秒一次
+    // 1.55: 设置页切换素材 -> Darwin 通知置位 -> 缓存立即作废重扫(新素材即时生效)
     NSString *path = nil;
     {
-        static NSString *gPickC = nil;
-        static double gPickCT = 0;
+        if (gMatChangedFlag) { gMatChangedFlag = 0; gPickCache = nil; ProbeWrite("MAT-CACHE-BUST"); }
         double nowT2 = CFAbsoluteTimeGetCurrent();
-        if (gPickC && (nowT2 - gPickCT) < 2.0) {
-            path = gPickC;
+        if (gPickCache && (nowT2 - gPickCacheTs) < 2.0) {
+            path = gPickCache;
         } else {
             path = GetSelectedImagePath();
-            gPickC = path;
-            gPickCT = nowT2;
+            gPickCache = path;
+            gPickCacheTs = nowT2;
         }
     }
     if (!path) {
@@ -1698,7 +1703,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.54");
+    ProbeWrite("LDD-BUILD v1.55");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -1723,6 +1728,12 @@ static void LDDInit(void) {
     static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
         PostRealNotification();
+    });
+    // 1.55: 设置页切换素材 -> 立即作废素材路径缓存, 新素材下一次来通知立刻生效
+    static int notifyMatTok = 0;
+    notify_register_dispatch("com.tlzypjy.github/MatChanged", &notifyMatTok, (void *)&_dispatch_main_q, ^(int tok){
+        gMatChangedFlag = 1;
+        ProbeWrite("MAT-CHANGED-SIG");
     });
     // 触发文件独立轮询: 与布局无关, 点预览后 0.1s 内即弹
     StartForceMonitor();
