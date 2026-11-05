@@ -144,6 +144,15 @@ static double cSpeed = 1.0;
 static double gLastAppliedSpeed = 1.0;
 // 1.50: 横幅停留时长(秒), 0=系统默认 —— 批1移植灵动通知
 static double cStay = 0.0;
+// 1.51: 横幅样式 (0标准 1紧凑 2迷你 3自定义) + 自定义宽高百分比
+static int cStyle = 0;
+static double cStyleW = 100.0;
+static double cStyleH = 100.0;
+// 1.51: 宽横幅(h>=60)首帧时间戳 —— 停留时长的计时基准; gWideLastH 上一帧布局高度
+static double gWideShownTs = 0;
+static double gWideLastH = 0;
+static double gDeferredAtTs = 0;
+static int gStayDeferred = 0;
 static void ConsumeForcePreview(void);
 static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, y, w, h}; return r; }
 typedef struct UIEdgeInsets { double top, left, bottom, right; } UIEdgeInsets;
@@ -768,6 +777,10 @@ static void RefreshPrefsCache(void) {
     cSpeed = GetLddGifBgSpeed();
     // 1.50: 横幅停留时长 (0=系统默认, 3~15 秒)
     { id v = LoadPrefsValue(@"lddgifbgStay"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 60) d = 0.0; cStay = d; }
+    // 1.51: 横幅样式 + 自定义宽高
+    { id v = LoadPrefsValue(@"lddgifbgStyle"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 3) d = 0.0; cStyle = (int)d; }
+    { id v = LoadPrefsValue(@"lddgifbgStyleW"); double d = v ? [v doubleValue] : 100.0; if (!(d >= 40) || d > 150) d = 100.0; cStyleW = d; }
+    { id v = LoadPrefsValue(@"lddgifbgStyleH"); double d = v ? [v doubleValue] : 100.0; if (!(d >= 40) || d > 150) d = 100.0; cStyleH = d; }
     // 1.9.172: 素材目录扫描移出 0.5s 节流(原实现每 0.5s 扫目录=CPU元凶), 改为 SHOW-1 路径按 2s 缓存调用
     // 1.9.133: 速度变化即时生效 —— GIF 重启定时器, 视频更新 rate
     if (gLastAppliedSpeed != cSpeed) {
@@ -810,29 +823,87 @@ static id HookBNDInit(id self, SEL _c) {
     if (r) gPresentLayer = r;
     return r;
 }
-// ---------- 1.50 批1: 横幅停留时长 (移植灵动通知) ----------
-// 系统用 dismissTimer 安排横幅自动收回; 钩 setDismissTimer: 在系统设置完后按用户
-// 时长(cStay 秒)改写 fireDate。cStay<=0.5 = 用户未启用, 原样放行零开销。
-static void (*origBNDSetDismissTimer)(id, SEL, id);
-static int gStayLog = 0;
-static void HookBNDSetDismissTimer(id self, SEL _c, id timer) {
-    origBNDSetDismissTimer(self, _c, timer);
-    if (cStay <= 0.5) return;
+// ---------- 1.51 批2: 横幅样式 (标准/紧凑/迷你/自定义, 移植灵动通知) ----------
+// 探针实测 SIZE-ENC = v40@0:8@16o^{CGSize=dd}24o^{CGSize=dd}32 => v@:@^CGSize^CGSize,
+// 尺寸走指针写回 —— 钩它改写横幅呈现尺寸, 岛的黑色底座随之缩放。
+static void (*origBNDSizes)(id, SEL, id, CGSize *, CGSize *);
+static int gSizeLog = 0;
+static void LDDScaleSize(CGSize *s) {
+    if (!s) return;
+    if (cStyle == 1) { s->width *= 0.78; s->height *= 0.82; }        // 紧凑
+    else if (cStyle == 2) { s->width *= 0.52; s->height *= 0.60; }   // 迷你
+    else if (cStyle == 3) { s->width *= (cStyleW / 100.0); s->height *= (cStyleH / 100.0); } // 自定义
+    else return;
+    if (s->width < 160.0) s->width = 160.0;
+    if (s->height < 44.0) s->height = 44.0;
+}
+static void HookBNDSizes(id self, SEL _c, id presentable, CGSize *outSize, CGSize *outContainer) {
+    origBNDSizes(self, _c, presentable, outSize, outContainer);
     @try {
-        NSTimer *t = (NSTimer *)timer;
-        if (!t) return;
-        double remain = [(NSDate *)[t fireDate] timeIntervalSinceNow];
-        if (remain <= 0.1) return;
-        if (gStayLog < 20) {
-            gStayLog++;
-            char b[96];
-            snprintf(b, sizeof(b), "STAY-ARM remain=%.1f stay=%.1f", remain, cStay);
+        if (cStyle == 0 || !outSize) return;
+        double ow = outSize->width, oh = outSize->height;
+        LDDScaleSize(outSize);
+        if (gSizeLog < 30) {
+            gSizeLog++;
+            char b[140];
+            snprintf(b, sizeof(b), "SIZE-CALL %.0fx%.0f -> %.0fx%.0f st=%d", ow, oh, outSize->width, outSize->height, cStyle);
             ProbeWrite(b);
         }
-        [t setFireDate:[NSDate dateWithTimeIntervalSinceNow:cStay]];
-    } @catch (id e) {
-        if (gStayLog < 40) { gStayLog = 40; ProbeWrite("STAY-EXC"); }
+    } @catch (id e) { }
+}
+// ---------- 1.51: 横幅停留时长 v2 ----------
+// v1.50 的 setDismissTimer: 实测从不触发(探针无 STAY-ARM), 改挂收起链三钩(v1.36 验证过安全):
+// 系统发起的收起(_dismiss*)若发生在用户设定的停留时长内, 推迟一次到时长满再收。
+// 用户上划走 withdraw 路径, 不在拦截范围 -> 手动划掉永远即时。
+static int gStayLog2 = 0;
+static int gReasonLog = 0;
+static BOOL LDDStayGate(double *delayOut) {
+    if (cStay <= 0.5) return NO;
+    double now = CFAbsoluteTimeGetCurrent();
+    double elapsed = now - gWideShownTs;
+    if (elapsed < 0 || elapsed >= cStay) return NO;
+    if (gStayDeferred && now - gDeferredAtTs < cStay + 1.0) return NO; // 每条横幅只推迟一次, 防死循环
+    gStayDeferred = 1;
+    gDeferredAtTs = now;
+    *delayOut = cStay - elapsed;
+    return YES;
+}
+static void LDDStaySchedule(double delay, void (^callOrig)(void)) {
+    double snapTs = gWideShownTs;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * 1000000000.0)), dispatch_get_main_queue(), ^{
+        if (gWideShownTs == snapTs) callOrig(); // 期间来了新横幅则放弃这次代收
+    });
+}
+static void (*origBNDDismissDForce)(id, SEL, BOOL, id, BOOL);
+static void HookBNDDismissDForce(id self, SEL _c, BOOL a1, id a2, BOOL a3) {
+    double d;
+    if (LDDStayGate(&d)) {
+        if (gReasonLog < 30) { gReasonLog++; LogReason("DFORCE-REASON", a2); }
+        if (gStayLog2 < 20) { gStayLog2++; ProbeWrite("STAY-DEFER-DFORCE"); }
+        LDDStaySchedule(d, ^{ origBNDDismissDForce(self, _c, a1, a2, a3); });
+        return;
     }
+    origBNDDismissDForce(self, _c, a1, a2, a3);
+}
+static void (*origBNDOnly)(id, SEL, id, id, BOOL);
+static void HookBNDOnly(id self, SEL _c, id a1, id a2, BOOL a3) {
+    double d;
+    if (LDDStayGate(&d)) {
+        if (gStayLog2 < 20) { gStayLog2++; ProbeWrite("STAY-DEFER-ONLY"); }
+        LDDStaySchedule(d, ^{ origBNDOnly(self, _c, a1, a2, a3); });
+        return;
+    }
+    origBNDOnly(self, _c, a1, a2, a3);
+}
+static void (*origBNDOnly3)(id, SEL, id, id, BOOL, BOOL);
+static void HookBNDOnly3(id self, SEL _c, id a1, id a2, BOOL a3, BOOL a4) {
+    double d;
+    if (LDDStayGate(&d)) {
+        if (gStayLog2 < 20) { gStayLog2++; ProbeWrite("STAY-DEFER-ONLY3"); }
+        LDDStaySchedule(d, ^{ origBNDOnly3(self, _c, a1, a2, a3, a4); });
+        return;
+    }
+    origBNDOnly3(self, _c, a1, a2, a3, a4);
 }
 static void FindLayerConsider(id o, SEL sISL, SEL sPost, id *bestISL, id *bestPost) {
     if (!o) return;
@@ -1037,6 +1108,10 @@ static void LDDIslandLayout(id self) {
         snprintf(sb, sizeof(sb), "SHOW-%d en=%d w=%.0f h=%.0f", show ? 1 : 0, cEnabled ? 1 : 0, bb.w, bb.h);
         ProbeWrite(sb);
     }
+    // 1.51: 宽横幅(h>=60)首帧记时 —— 停留时长计时基准; 新横幅出现时重置"已推迟"标志
+    { double nowL = CFAbsoluteTimeGetCurrent();
+      if (bb.h >= 60) { if (gWideLastH < 60) { gWideShownTs = nowL; gStayDeferred = 0; } }
+      gWideLastH = bb.h; }
     if (!show) {
         // 1.42: master OFF - strip background from this tree and tear down media.
         RemoveTagged(self, 9997);
@@ -1723,7 +1798,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.50");
+    ProbeWrite("LDD-BUILD v1.51");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
@@ -1745,26 +1820,27 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
-    // 1.50 批1: 横幅停留时长 —— 钩 SBNotificationBannerDestination 的 setDismissTimer:,
-    // 系统设完定时器后按用户时长改写 fireDate (cStay<=0.5 视为默认, 不干预)。
+    // 1.51 批2: 横幅样式 + 停留时长 v2 (全部挂在 SBNotificationBannerDestination 上)
     {
         id clsStay = objc_getClass("SBNotificationBannerDestination");
         if (clsStay) {
-            void *sm = class_getInstanceMethod((Class)clsStay, sel_registerName("setDismissTimer:"));
-            if (sm) {
-                MSHookMessageEx((Class)clsStay, sel_registerName("setDismissTimer:"), (IMP)HookBNDSetDismissTimer, (IMP *)&origBNDSetDismissTimer);
-                ProbeWrite("STAY-HOOK-INSTALLED");
+            if (class_getInstanceMethod((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"))) {
+                MSHookMessageEx((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"), (IMP)HookBNDSizes, (IMP *)&origBNDSizes);
+                ProbeWrite("SIZE-HOOK-INSTALLED");
             } else {
-                ProbeWrite("STAY-NO-SETTER");
+                ProbeWrite("SIZE-HOOK-MISSING");
             }
-            // 1.50 批2预研: 打印横幅尺寸回调的真实类型编码 (下版按它挂钩做标准/紧凑/迷你样式)
-            void *pm = class_getInstanceMethod((Class)clsStay, sel_registerName("notificationPresentableViewController:presentationSize:containerSize:"));
-            if (pm) {
-                const char *te = method_getTypeEncoding(pm);
-                char b[220]; snprintf(b, sizeof(b), "SIZE-ENC %s", te ? te : "?");
-                ProbeWrite(b);
-            } else {
-                ProbeWrite("SIZE-ENC-MISSING");
+            if (class_getInstanceMethod((Class)clsStay, sel_registerName("_dismissPresentedBannerAnimated:reason:forceIfSticky:"))) {
+                MSHookMessageEx((Class)clsStay, sel_registerName("_dismissPresentedBannerAnimated:reason:forceIfSticky:"), (IMP)HookBNDDismissDForce, (IMP *)&origBNDDismissDForce);
+                ProbeWrite("STAY2-DFORCE");
+            }
+            if (class_getInstanceMethod((Class)clsStay, sel_registerName("_dismissPresentedBannerOnly:reason:animated:"))) {
+                MSHookMessageEx((Class)clsStay, sel_registerName("_dismissPresentedBannerOnly:reason:animated:"), (IMP)HookBNDOnly, (IMP *)&origBNDOnly);
+                ProbeWrite("STAY2-ONLY");
+            }
+            if (class_getInstanceMethod((Class)clsStay, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"))) {
+                MSHookMessageEx((Class)clsStay, sel_registerName("_dismissPresentedBannerOnly:reason:animated:forceIfSticky:"), (IMP)HookBNDOnly3, (IMP *)&origBNDOnly3);
+                ProbeWrite("STAY2-ONLY3");
             }
         } else {
             ProbeWrite("STAY-NO-CLASS");
