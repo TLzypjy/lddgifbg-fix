@@ -23,7 +23,8 @@ extern "C" id objc_getClass(const char *name);
 extern "C" SEL sel_registerName(const char *name);
 extern "C" void *dlopen(const char *path, int mode);
 extern "C" void *dlsym(void *handle, const char *symbol);
-extern "C" int system(const char *cmd);
+// 1.65: SDK 把 system() 标记为 iOS 不可用 -> 运行时 dlsym 取
+static int (*_system_fn)(const char *) = 0;
 extern "C" void CFRelease(void *cf);
 extern "C" void objc_setAssociatedObject(id obj, const char *key, id value, unsigned long policy);
 extern "C" id objc_getAssociatedObject(id obj, const char *key);
@@ -333,9 +334,12 @@ extern "C" void UIGraphicsEndImageContext(void);
 @end
 @interface UIViewController : NSObject
 - (void)viewWillAppear:(BOOL)a;
+- (void)viewWillDisappear:(BOOL)a;
 - (id)initWithNibName:(id)n bundle:(id)b;
 - (id)view;
 - (id)navigationItem;
+- (void)setTitleView:(id)v;
+- (id)titleView;
 - (void)setLeftBarButtonItem:(id)b;
 - (void)setRightBarButtonItem:(id)b;
 - (void)setRightBarButtonItems:(id)items;
@@ -748,7 +752,7 @@ static id LDDListMaterialFolders(void) {
     [l1 setText:@"素材库"];
     [l1 setTextAlignment:1];
     [l1 setFont:[UIFont systemFontOfSize:16.0]];
-    [l1 setTextColor:[UIColor blackColor]];
+    [l1 setTextColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
     [tv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 21, 280, 13)];
     [l2 setTag:977];
@@ -765,7 +769,7 @@ static id LDDListMaterialFolders(void) {
         UILabel *l = (UILabel *)[tv viewWithTag:990];
         if (l) { [l setText:t]; return; }
     }
-    [self setBarTitle:t];
+    [self setTitle:t];
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -1897,7 +1901,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     // 1.65: 改用 PATH 解析的 killall(二进制里不再出现 /var/jb 绝对路径,
     // RootHide 转换器的 fixed-paths 提示随之减少)
     @try {
-        system("killall -9 SpringBoard");
+        if (!_system_fn) {
+            void *h = dlopen(0, 1);
+            if (h) _system_fn = (int (*)(const char *))dlsym(h, "system");
+        }
+        if (_system_fn) _system_fn("killall -9 SpringBoard");
+        else LogB("RESPRING-NO-SYS");
     } @catch (id e) { LogB("RESPRING-EXC"); }
 }
 // 1.9.185: 点击越狱源 -> 复制链接到剪贴板, 文字短暂反馈"已复制"
