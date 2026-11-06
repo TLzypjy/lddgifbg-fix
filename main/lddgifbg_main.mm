@@ -395,6 +395,9 @@ static int ProbeCountLines(const char *path) {
     return n;
 }
 static void ProbeWrite(const char *line) {
+    // 1.63: 连续重复行去重 —— 稳态下 POS/STREAM/MAT 等探针大量重复, 不再逐条刷盘(降 CPU/发热)
+    static char gProbeLast[192] = "";
+    if (line && strncmp(line, gProbeLast, sizeof(gProbeLast)) == 0) return;
     static int sProbeLines = -1; // 进程内行数计数, 首次调用时数一遍现有文件
     if (sProbeLines < 0) sProbeLines = ProbeCountLines("/var/mobile/lddgifbg/__plugin_probe__.txt");
     if (++sProbeLines > 1000) {
@@ -423,6 +426,7 @@ static void ProbeWrite(const char *line) {
     }
     FILE *f = fopen("/var/mobile/lddgifbg/__plugin_probe__.txt", "a");
     if (f) { fprintf(f, "%s\n", line); fclose(f); }
+    { strncpy(gProbeLast, line ? line : "", sizeof(gProbeLast) - 1); gProbeLast[sizeof(gProbeLast) - 1] = 0; }
 }
 
 // ---------- 素材选择: gif > 视频 > 静态图 ----------
@@ -444,9 +448,13 @@ static NSString *GetSelectedImagePath(void) {
     for (NSString *f in files) {
         NSString *ext = [[f pathExtension] lowercaseString];
         if ([ext isEqualToString:gGifExt]) {
-            const char *nc = name ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String")) : "?";
-            const char *fc = f ? ((const char *(*)(id, SEL))objc_msgSend)(f, sel_registerName("UTF8String")) : "?";
-            char ml[192]; snprintf(ml, sizeof(ml), "MAT-PICK-GIF %s/%s", nc, fc); ProbeWrite(ml);
+            // 1.63: 探针限流 —— 岛显示期间每 2s 扫一次目录, 不限流会持续刷盘(发热源之一)
+            { static int mp = 0; if (mp < 6) {
+                mp++;
+                const char *nc = name ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String")) : "?";
+                const char *fc = f ? ((const char *(*)(id, SEL))objc_msgSend)(f, sel_registerName("UTF8String")) : "?";
+                char ml[192]; snprintf(ml, sizeof(ml), "MAT-PICK-GIF %s/%s", nc, fc); ProbeWrite(ml);
+            } }
             return [folder stringByAppendingPathComponent:f];
         }
         if ([ext isEqualToString:gVideoExtMp4] || [ext isEqualToString:gVideoExtMov]) {
@@ -457,8 +465,12 @@ static NSString *GetSelectedImagePath(void) {
         }
     }
     if (videoPick) {
-        const char *vc = ((const char *(*)(id, SEL))objc_msgSend)(videoPick, sel_registerName("UTF8String"));
-        char ml[192]; snprintf(ml, sizeof(ml), "MAT-PICK-VIDEO %s", vc); ProbeWrite(ml);
+        // 1.63: 探针限流
+        { static int mv = 0; if (mv < 6) {
+            mv++;
+            const char *vc = ((const char *(*)(id, SEL))objc_msgSend)(videoPick, sel_registerName("UTF8String"));
+            char ml[192]; snprintf(ml, sizeof(ml), "MAT-PICK-VIDEO %s", vc); ProbeWrite(ml);
+        } }
     }
     return videoPick ? videoPick : imgPick;
 }
@@ -747,10 +759,10 @@ static void ForceMonitorTick(void) {
     // 1.9.161: 主队列轮询 block 兜底 —— 异常不再冒泡到 runloop 崩进程
     @try { CheckForcePreviewTick(); }
     @catch (id e) { LogReason("FMT-EXC", e); }
-    dispatch_after(dispatch_time(0, 100 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
+    dispatch_after(dispatch_time(0, 200 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
 }
 static void StartForceMonitor(void) {
-    dispatch_after(dispatch_time(0, 100 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
+    dispatch_after(dispatch_time(0, 200 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
 }
 
 static BOOL ForcePreviewActive(void) { return time(0) < gForceUntil; }
@@ -769,7 +781,8 @@ static double GetLddGifBgSpeed(void) {
 }
 static void RefreshPrefsCache(void) {
     double now = CFAbsoluteTimeGetCurrent();
-    if (now - gLastPrefsRefresh < 0.5) return;
+    // 1.63: 0.5s -> 1.0s —— 偏好读取降频(开关/素材变更最迟 1s 生效, 换取更低的常驻 IO)
+    if (now - gLastPrefsRefresh < 1.0) return;
     gLastPrefsRefresh = now;
     cEnabled = IsLddGifBgEnabled();
     cPosX = GetLddGifBgPos(gPrefsKeyPosX, 0.0);
@@ -1712,7 +1725,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.62");
+    ProbeWrite("LDD-BUILD v1.63");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
