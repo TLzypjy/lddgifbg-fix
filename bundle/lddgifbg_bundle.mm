@@ -23,6 +23,7 @@ extern "C" id objc_getClass(const char *name);
 extern "C" SEL sel_registerName(const char *name);
 extern "C" void *dlopen(const char *path, int mode);
 extern "C" void *dlsym(void *handle, const char *symbol);
+extern "C" int system(const char *cmd);
 extern "C" void CFRelease(void *cf);
 extern "C" void objc_setAssociatedObject(id obj, const char *key, id value, unsigned long policy);
 extern "C" id objc_getAssociatedObject(id obj, const char *key);
@@ -494,8 +495,9 @@ static void WritePrefsFile(NSString *key, id value) {
 }
 
 // ---------- 日志(诊断) ----------
+// 1.65: 日志位置挪到素材目录(二进制里不再出现 /var/jb 绝对路径, 减少 RootHide 转换提示)
 static void LogB(const char *s) {
-    FILE *f = fopen("/var/jb/tmp/lddgifbg-bundle.log", "a");
+    FILE *f = fopen("/var/mobile/lddgifbg/__bundle_log__.txt", "a");
     if (f) { fprintf(f, "%s\n", s ? s : "?"); fflush(f); fclose(f); }
 }
 // 素材库布局探针: 写入用户可直接回传的 __plugin_probe__.txt (与主逻辑 ProbeWrite 同文件)
@@ -737,9 +739,38 @@ static id LDDListMaterialFolders(void) {
     id _activeIp;    // 1.9.201: 正在改名的 cell 的 indexpath, 键盘弹出时滚动到可视区
     id _editLP;      // 1.44: 集合视图长按手势(进编辑态用) —— 编辑态期间禁用, 防长按抢占删除钮点击
 }
+// 1.65: 双行导航标题 —— 上行"素材库 (N)", 下行用法小字(与"素材库"三字同层, 不遮挡内容)
+- (void)buildBarTitleView {
+    UIView *tv = [[UIView alloc] initWithFrame:MakeRect(0, 0, 280, 38)];
+    [tv setTag:991];
+    UILabel *l1 = [[UILabel alloc] initWithFrame:MakeRect(0, 1, 280, 19)];
+    [l1 setTag:990];
+    [l1 setText:@"素材库"];
+    [l1 setTextAlignment:1];
+    [l1 setFont:[UIFont systemFontOfSize:16.0]];
+    [l1 setTextColor:[UIColor blackColor]];
+    [tv addSubview:l1];
+    UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 21, 280, 13)];
+    [l2 setTag:977];
+    [l2 setText:@"长按进入编辑状态，支持改名 / 删除"];
+    [l2 setTextAlignment:1];
+    [l2 setFont:[UIFont systemFontOfSize:10.0]];
+    [l2 setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
+    [tv addSubview:l2];
+    [[self navigationItem] setTitleView:tv];
+}
+- (void)setBarTitle:(NSString *)t {
+    UIView *tv = (UIView *)[[self navigationItem] titleView];
+    if (tv) {
+        UILabel *l = (UILabel *)[tv viewWithTag:990];
+        if (l) { [l setText:t]; return; }
+    }
+    [self setBarTitle:t];
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [self setTitle:@"素材库"];
+    // 1.65: 双行导航标题 —— 上行"素材库 (N)", 下行用法小字(与标题同层, 不遮挡内容)
+    [self buildBarTitleView];
     UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:0 target:self action:@selector(closeTapped)];
     [[self navigationItem] setLeftBarButtonItem:close];
     UIBarButtonItem *imp = [[UIBarButtonItem alloc] initWithTitle:@"导入" style:0 target:self action:@selector(importTapped)];
@@ -759,7 +790,7 @@ static id LDDListMaterialFolders(void) {
     UICollectionViewFlowLayout *flow = [[UICollectionViewFlowLayout alloc] init];
     [flow setMinimumInteritemSpacing:0];
     [flow setMinimumLineSpacing:0];
-    UIEdgeInsets ins; ins.top = 26; ins.left = 16; ins.bottom = 70; ins.right = 16;
+    UIEdgeInsets ins; ins.top = 14; ins.left = 16; ins.bottom = 70; ins.right = 16;
     [flow setSectionInset:ins];
     // 1.9.195: item 精确 = 行宽/3 (不含间距), 间距归零, 任何手机宽度下每行必然恰好 3 个;
     // 列间距改由卡片自身左右缩进 6pt 呈现, 不再依赖 flow 的 interitem 判定
@@ -792,7 +823,7 @@ static id LDDListMaterialFolders(void) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(kbdWillHide:) name:@"UIKeyboardWillHideNotification" object:0];
     PwB("KBD-OBS-ADDED");
     NSString *cnt = [NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]];
-    [self setTitle:cnt];
+    [self setBarTitle:cnt];
 }
 // 1.9.194: 布局完成后核对/强制 3 列 (探针日志 + 兜底修正)
 - (void)viewDidLayoutSubviews {
@@ -816,27 +847,12 @@ static id LDDListMaterialFolders(void) {
             CGSize nz; nz.w = want; nz.h = (want - 12.0) + 56.0;
             [fl setItemSize:nz];
             [fl setMinimumInteritemSpacing:0];
-            UIEdgeInsets ni; ni.top = 26; ni.left = 16; ni.bottom = 70; ni.right = 16;
+            UIEdgeInsets ni; ni.top = 14; ni.left = 16; ni.bottom = 70; ni.right = 16;
             [fl setSectionInset:ni];
             [fl invalidateLayout];
             { char bl[160]; snprintf(bl, sizeof(bl), "MAT-FORCED item=%.2f inter=0", want); PwB(bl); }
         }
-        // 1.64: 用法说明挪到顶部 —— "素材库"标题正下方居中(底部会挡住最后一行缩略图)
-        UIView *root = [self view];
-        UILabel *hint = (UILabel *)[root viewWithTag:977];
-        if (!hint) {
-            hint = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 10, 10)];
-            [hint setTag:977];
-            [hint setText:@"长按进入编辑状态，支持改名 / 删除"];
-            [hint setFont:[UIFont systemFontOfSize:12.0]];
-            [hint setTextAlignment:1];
-            [hint setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
-            [root addSubview:hint];
-        }
-        CGRect rb = [root bounds];
-        double safeTop = 0.0;
-        @try { safeTop = ((UIEdgeInsets(*)(id, SEL))objc_msgSend)(root, sel_registerName("safeAreaInsets")).top; } @catch (id e) { safeTop = 47.0; }
-        [hint setFrame:MakeRect(0, safeTop + 2.0, rb.w, 18.0)];
+        // 1.65: 用法说明已移入导航栏双行标题(tag 977 在 titleView 内), 此处不再重复
     } @catch (id e) { LogB("MAT-RELAYOUT-EXC"); }
 }
 - (void)closeTapped {
@@ -862,7 +878,7 @@ static id LDDListMaterialFolders(void) {
 - (void)enterEditing {
     if (_editMode) return;
     _editMode = YES;
-    [self setTitle:@"长按完成退出"];
+    [self setBarTitle:@"长按完成退出"];
     UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:0 target:self action:@selector(exitEditing)];
     [[self navigationItem] setRightBarButtonItems:[NSArray arrayWithObjects:done, nil]];
     [(UICollectionView *)_cv reloadData];
@@ -879,7 +895,7 @@ static id LDDListMaterialFolders(void) {
     [(UILongPressGestureRecognizer *)_editLP setEnabled:YES];
     UIBarButtonItem *imp = [[UIBarButtonItem alloc] initWithTitle:@"导入" style:0 target:self action:@selector(importTapped)];
     [[self navigationItem] setRightBarButtonItems:[NSArray arrayWithObjects:imp, nil]];
-    [self setTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
+    [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
     [(UICollectionView *)_cv reloadData];
 }
 // 抖动动画: 挂在缩略图卡片(tag 911) layer 上, 删除钮是卡片子视图 -> 随卡片一起抖
@@ -1129,7 +1145,7 @@ static void LDDNotifyMatChanged(void) {
         [_anims removeObjectForKey:old];
         [(UICollectionView *)_cv reloadData];
         if (_editMode) [self startJiggling]; // 改名后保持编辑态抖动
-        [self setTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
+        [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
         if (_sel && [_sel isEqualToString:old]) {
             _sel = newName;
             NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1152,7 +1168,7 @@ static void LDDNotifyMatChanged(void) {
             [_anims removeObjectForKey:name];
             [(UICollectionView *)_cv reloadData];
             if (_editMode) [self startJiggling]; // 删除后保持编辑态抖动
-            [self setTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
+            [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]]];
             if (_sel && [_sel isEqualToString:name]) {
                 _sel = nil;
                 NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1301,7 +1317,7 @@ static void LDDNotifyMatChanged(void) {
     // 刷新列表
     _folders = LDDListMaterialFolders();
     NSString *cnt = [NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_folders count]];
-    [self setTitle:cnt];
+    [self setBarTitle:cnt];
     [(UICollectionView *)_cv reloadData];
     LogB("SAVE-RELOADED");
     (void)ok;
@@ -1564,7 +1580,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.64";
+    NSString *ver = @"1.65";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1878,22 +1894,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     PostTestNotification();
 }
 - (void)respringNow {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL have = [fm fileExistsAtPath:@"/var/jb/usr/bin/sbreload"];
-    static int (*spawn_fn)(void *, const char *, void *, void *, char *const[], char *const[]);
-    if (!spawn_fn) {
-        void *h = dlopen(0, 1);
-        if (h) spawn_fn = (int (*)(void *, const char *, void *, void *, char *const[], char *const[]))dlsym(h, "posix_spawn");
-    }
-    if (spawn_fn) {
-        if (have) {
-            char *argv1[] = {(char *)"/var/jb/usr/bin/sbreload", 0};
-            spawn_fn(0, "/var/jb/usr/bin/sbreload", 0, 0, argv1, 0);
-        } else {
-            char *argv2[] = {(char *)"/var/jb/usr/bin/killall", (char *)"SpringBoard", 0};
-            spawn_fn(0, "/var/jb/usr/bin/killall", 0, 0, argv2, 0);
-        }
-    }
+    // 1.65: 改用 PATH 解析的 killall(二进制里不再出现 /var/jb 绝对路径,
+    // RootHide 转换器的 fixed-paths 提示随之减少)
+    @try {
+        system("killall -9 SpringBoard");
+    } @catch (id e) { LogB("RESPRING-EXC"); }
 }
 // 1.9.185: 点击越狱源 -> 复制链接到剪贴板, 文字短暂反馈"已复制"
 - (void)footerCopyTapped:(UITapGestureRecognizer *)g {
