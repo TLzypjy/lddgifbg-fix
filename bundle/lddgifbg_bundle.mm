@@ -132,6 +132,10 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 + (id)URLWithString:(NSString *)s;
 - (NSString *)pathExtension;
 @end
+@interface UIPasteboard : NSObject
++ (id)generalPasteboard;
+- (void)setString:(NSString *)s;
+@end
 @interface NSIndexPath : NSObject
 - (NSInteger)row;
 @end
@@ -759,7 +763,7 @@ static id LDDListMaterialFolders(void) {
     UICollectionViewFlowLayout *flow = [[UICollectionViewFlowLayout alloc] init];
     [flow setMinimumInteritemSpacing:0];
     [flow setMinimumLineSpacing:0];
-    UIEdgeInsets ins; ins.top = 14; ins.left = 16; ins.bottom = 70; ins.right = 16;
+    UIEdgeInsets ins; ins.top = 26; ins.left = 16; ins.bottom = 70; ins.right = 16;
     [flow setSectionInset:ins];
     // 1.9.195: item 精确 = 行宽/3 (不含间距), 间距归零, 任何手机宽度下每行必然恰好 3 个;
     // 列间距改由卡片自身左右缩进 6pt 呈现, 不再依赖 flow 的 interitem 判定
@@ -816,12 +820,12 @@ static id LDDListMaterialFolders(void) {
             CGSize nz; nz.w = want; nz.h = (want - 12.0) + 56.0;
             [fl setItemSize:nz];
             [fl setMinimumInteritemSpacing:0];
-            UIEdgeInsets ni; ni.top = 14; ni.left = 16; ni.bottom = 70; ni.right = 16;
+            UIEdgeInsets ni; ni.top = 26; ni.left = 16; ni.bottom = 70; ni.right = 16;
             [fl setSectionInset:ni];
             [fl invalidateLayout];
             { char bl[160]; snprintf(bl, sizeof(bl), "MAT-FORCED item=%.2f inter=0", want); PwB(bl); }
         }
-        // 1.63: 页面最底部居中用法说明
+        // 1.64: 用法说明挪到顶部 —— "素材库"标题正下方居中(底部会挡住最后一行缩略图)
         UIView *root = [self view];
         UILabel *hint = (UILabel *)[root viewWithTag:977];
         if (!hint) {
@@ -834,7 +838,9 @@ static id LDDListMaterialFolders(void) {
             [root addSubview:hint];
         }
         CGRect rb = [root bounds];
-        [hint setFrame:MakeRect(0, rb.h - 34.0, rb.w, 18.0)];
+        double safeTop = 0.0;
+        @try { safeTop = ((UIEdgeInsets(*)(id, SEL))objc_msgSend)(root, sel_registerName("safeAreaInsets")).top; } @catch (id e) { safeTop = 47.0; }
+        [hint setFrame:MakeRect(0, safeTop + 2.0, rb.w, 18.0)];
     } @catch (id e) { LogB("MAT-RELAYOUT-EXC"); }
 }
 - (void)closeTapped {
@@ -1551,7 +1557,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.63";
+    NSString *ver = @"1.64";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1748,12 +1754,13 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [self presentViewController:nav animated:YES completion:0];
         }
     } else if (row == 6) {
+        // 1.64: 没装 Filza 时旧版静默无反应 -> 现在把路径复制到剪贴板并提示
         UIApplication *app = [UIApplication sharedApplication];
         NSURL *fz = [NSURL URLWithString:@"filza://view/var/mobile/lddgifbg"];
         [app openURL:fz options:[NSDictionary dictionary] completionHandler:^(BOOL ok){
             if (!ok) {
-                NSURL *url = [NSURL fileURLWithPath:@"/var/mobile/lddgifbg"];
-                [app openURL:url options:[NSDictionary dictionary] completionHandler:0];
+                [[UIPasteboard generalPasteboard] setString:@"/var/mobile/lddgifbg"];
+                [self showTip:@"未找到 Filza，素材目录路径已复制"];
             }
         }];
     } else if (row == 7) {
