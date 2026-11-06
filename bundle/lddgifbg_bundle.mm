@@ -184,6 +184,7 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 - (void)setFrame:(CGRect)r;
 - (void)addSubview:(id)v;
 - (CGRect)convertRect:(CGRect)r toView:(id)v;
+- (CGRect)convertRect:(CGRect)r fromView:(id)v;
 // 1.9.140: 预览偏移用
 - (void)setTransform:(CGAffineTransform)t;
 - (void)setTag:(NSInteger)t;
@@ -1546,7 +1547,7 @@ static const char kLDDRandOptKey = 0;
         [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
         [opt setFont:[UIFont systemFontOfSize:15.0]];
         [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
-        objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithLong:k], 1);
+        objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
         [menu addSubview:opt];
     }
 }
@@ -1975,7 +1976,7 @@ static const char kLDDValTagKey = 0;
     [tf setReturnKeyType:9];
     [tf setTag:7777];
     [tf addTarget:self action:@selector(inlineEditDone:) forControlEvents:(1 << 19)]; // EditingDidEndOnExit(按完成)
-    objc_setAssociatedObject(tf, &kLDDValTagKey, [NSNumber numberWithInteger:tag], 1);
+    objc_setAssociatedObject(tf, &kLDDValTagKey, [NSNumber numberWithDouble:(double)tag], 1);
     [root addSubview:tf];
     [tf becomeFirstResponder];
 }
@@ -1983,7 +1984,7 @@ static const char kLDDValTagKey = 0;
 - (void)inlineEditDone:(UITextField *)tf {
     @try {
         NSNumber *tn = objc_getAssociatedObject(tf, &kLDDValTagKey);
-        NSInteger tag = tn ? [tn integerValue] : 0;
+        NSInteger tag = tn ? [tn doubleValue] : 0;
         NSString *txt = [tf text];
         double nv = [txt doubleValue];
         if (tag == 2025) {
