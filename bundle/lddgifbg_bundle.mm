@@ -183,6 +183,7 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 - (CGRect)frame;
 - (void)setFrame:(CGRect)r;
 - (void)addSubview:(id)v;
+- (CGRect)convertRect:(CGRect)r toView:(id)v;
 // 1.9.140: 预览偏移用
 - (void)setTransform:(CGAffineTransform)t;
 - (void)setTag:(NSInteger)t;
@@ -242,7 +243,7 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 - (CGRect)frame;
 - (void)setFrame:(CGRect)r;
 @end
-@interface UITextField : UIView
+@interface UITextField : UIControl
 - (void)setPlaceholder:(NSString *)p;
 - (id)text;
 - (void)setText:(NSString *)t;
@@ -331,6 +332,7 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (id)dequeueReusableCellWithIdentifier:(NSString *)ri;
 - (void)deselectRowAtIndexPath:(id)ip animated:(BOOL)a;
 - (id)cellForRowAtIndexPath:(id)ip;
+- (CGRect)rectForRowAtIndexPath:(id)ip;
 @end
 @interface UIViewController : NSObject
 - (void)viewWillAppear:(BOOL)a;
@@ -445,6 +447,8 @@ extern "C" void UIGraphicsEndImageContext(void);
 @interface CALayer : NSObject
 - (void)setCornerRadius:(double)r;
 - (void)setMasksToBounds:(BOOL)b;
+- (void)setBorderWidth:(double)w;
+- (void)setBorderColor:(CGColorRef)c;
 - (void)setShadowColor:(CGColorRef)c;
 - (void)setShadowOpacity:(float)o;
 - (void)setShadowRadius:(double)r;
@@ -1478,10 +1482,74 @@ static void LDDNotifyMatChanged(void) {
 - (void)footerCopyRestore:(NSTimer *)t;
 // 1.64: 跳转素材目录的 Filza 兜底提示
 - (void)showTip:(NSString *)msg;
+// 1.68: 素材随机锚定弹层 + 滑条数值内联输入
+- (void)openRandomPickerAtIndexPath:(id)ip tableView:(id)tv;
+- (void)dismissRandomPicker;
+- (void)randomOptTapped:(id)b;
+- (void)inlineEditDone:(id)tf;
 @end
 
+// 1.68: 素材随机锚定弹层
+static const char kLDDRandOptKey = 0;
 
 @implementation lddgifbgRootListController
+// 1.68: 关闭随机弹层(点空白处)
+- (void)dismissRandomPicker {
+    UIView *root = [self view];
+    UIView *menu = [root viewWithTag:997];
+    if (menu) [menu removeFromSuperview];
+    UIView *mask = [root viewWithTag:996];
+    if (mask) [mask removeFromSuperview];
+}
+// 1.68: 选中一个随机模式
+- (void)randomOptTapped:(UIButton *)b {
+    NSNumber *k = objc_getAssociatedObject(b, &kLDDRandOptKey);
+    long mode = k ? [k longValue] : 0;
+    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+    [ud setObject:[NSNumber numberWithDouble:(double)mode] forKey:@"lddgifbgRandom"];
+    [ud synchronize];
+    WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:(double)mode]);
+    [self dismissRandomPicker];
+}
+// 1.68: 锚定在"素材随机"行下方的弹层(同灵动通知"点击动作"交互)
+- (void)openRandomPickerAtIndexPath:(id)ip tableView:(id)tv {
+    [self dismissRandomPicker];
+    UIView *root = [self view];
+    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+    id v = [ud objectForKey:@"lddgifbgRandom"];
+    long cur = v ? (long)[v doubleValue] : 0;
+    CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
+    CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
+    double mw = 170.0, mh = 132.0;
+    double mx = vr.origin.x + vr.size.width - mw - 8.0;
+    if (mx < 8) mx = 8;
+    double my = vr.origin.y + vr.size.height - 4.0;
+    // 全屏透明遮罩(点空白关闭)
+    UIView *mask = [[UIView alloc] initWithFrame:[root bounds]];
+    [mask setTag:996];
+    UITapGestureRecognizer *dg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissRandomPicker)];
+    [mask addGestureRecognizer:dg];
+    [root addSubview:mask];
+    // 菜单本体
+    UIView *menu = [[UIView alloc] initWithFrame:MakeRect(mx, my, mw, mh)];
+    [menu setTag:997];
+    [menu setBackgroundColor:[UIColor colorWithWhite:0.98 alpha:1.0]];
+    [[menu layer] setCornerRadius:12.0];
+    [[menu layer] setMasksToBounds:YES];
+    [[menu layer] setBorderWidth:1.0];
+    [[menu layer] setBorderColor:[UIColor colorWithWhite:0.82 alpha:1.0].CGColor];
+    [root addSubview:menu];
+    for (int k = 0; k < 3; k++) {
+        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 44.0, mw, 44.0)];
+        NSString *t = (k == 0 ? LDDRandomName(0) : (k == 1 ? LDDRandomName(1) : LDDRandomName(2)));
+        [opt setTitle:(cur == k ? ([NSString stringWithFormat:@"✓ %@", t]) : t) forState:0];
+        [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
+        [opt setFont:[UIFont systemFontOfSize:15.0]];
+        [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
+        objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithLong:k], 1);
+        [menu addSubview:opt];
+    }
+}
 // 1.64: 根页面弹提示 (素材库页面的 showTip 是另一个类的, 这里需要自己的)
 - (void)showTip:(NSString *)msg {
     @try {
@@ -1590,7 +1658,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.67";
+    NSString *ver = @"1.68";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1769,12 +1837,18 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 130, 19, 114, 22)];
         [vv setTextAlignment:2];
         [vv setFont:[UIFont systemFontOfSize:13.0]];
-        [vv setTextColor:[UIColor colorWithRed:0.0 green:0.45 blue:1.0 alpha:1.0]];
+        [vv setTextColor:[UIColor colorWithRed:0.33 green:0.33 blue:0.33 alpha:1.0]];
+        [vv setTextAlignment:1];
         [vv setTag:2029];
         NSUserDefaults *uds = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id sv = [uds objectForKey:@"lddgifbgRandom"];
         long st = sv ? (long)[sv doubleValue] : 0;
-        [vv setText:LDDRandomName(st)];
+        [vv setText:[NSString stringWithFormat:@"%@ ▾", LDDRandomName(st)]];
+        // 1.68: 方框样式(边框+圆角), 同"通知上岛样式 标准 ▾"
+        [[vv layer] setBorderWidth:1.0];
+        [[vv layer] setBorderColor:[UIColor colorWithWhite:0.72 alpha:1.0].CGColor];
+        [[vv layer] setCornerRadius:10.0];
+        [[vv layer] setMasksToBounds:YES];
         [[cell contentView] addSubview:vv];
         [cell setSelectionStyle:1];
     } else {
@@ -1791,40 +1865,14 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
+    // 1.68: 内联输入框开着时, 先提交再消费本次点击
+    UIView *rootV = [self view];
+    UITextField *pend = (UITextField *)[rootV viewWithTag:7777];
+    if (pend) { [self inlineEditDone:pend]; return; }
     // 1.66: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
     if (row == 5) {
-        // 1.67: 点击弹出选择框(同灵动通知交互), 不再循环切换
-        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id v = [ud objectForKey:@"lddgifbgRandom"];
-        long cur = v ? (long)[v doubleValue] : 0;
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"素材随机" message:@"来通知时的素材选取方式" preferredStyle:1];
-        UIAlertAction *a0 = [UIAlertAction actionWithTitle:(cur == 0 ? @"✓ 关" : @"关") style:0 handler:^(UIAlertAction *a){
-            [ud setObject:[NSNumber numberWithDouble:0] forKey:@"lddgifbgRandom"];
-            [ud synchronize];
-            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:0]);
-            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
-            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(0)]; }
-        }];
-        [ac addAction:a0];
-        UIAlertAction *a1 = [UIAlertAction actionWithTitle:(cur == 1 ? @"✓ 全部随机" : @"全部随机") style:0 handler:^(UIAlertAction *a){
-            [ud setObject:[NSNumber numberWithDouble:1] forKey:@"lddgifbgRandom"];
-            [ud synchronize];
-            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:1]);
-            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
-            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(1)]; }
-        }];
-        [ac addAction:a1];
-        UIAlertAction *a2 = [UIAlertAction actionWithTitle:(cur == 2 ? @"✓ 不重复随机" : @"不重复随机") style:0 handler:^(UIAlertAction *a){
-            [ud setObject:[NSNumber numberWithDouble:2] forKey:@"lddgifbgRandom"];
-            [ud synchronize];
-            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:2]);
-            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
-            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(2)]; }
-        }];
-        [ac addAction:a2];
-        UIAlertAction *cc = [UIAlertAction actionWithTitle:@"取消" style:1 handler:0];
-        [ac addAction:cc];
-        [self presentViewController:ac animated:YES completion:0];
+        // 1.68: 锚定弹层选择随机模式(同灵动通知"点击动作"交互)
+        [self openRandomPickerAtIndexPath:ip tableView:tv];
     } else if (row == 6) {
         // 1.48: 素材库改为推入式第二设置页(从右滑入, 系统 nav bar 原生返回), 不再用底部弹出 sheet;
         // 无导航栈时回退模态呈现。
@@ -1902,25 +1950,40 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2025]; if (vl) [vl setText:[NSString stringWithFormat:@"%.1fx", dv]]; }
 }
 // 1.52 自用版: 横幅停留/样式滑条已随钩子回滚一并移除
-// 1.9.153: 点击数值 -> 弹输入框自定义填入, 同步滑块/预览/prefs
+// 1.68: 点击数值 -> 原位内联输入(同素材库改名交互), 不再弹 Alert
+static const char kLDDValTagKey = 0;
 - (void)valTapped:(UITapGestureRecognizer *)g {
     id vl = [g view];
     NSInteger tag = [vl tag];
     if (tag != 2023 && tag != 2024 && tag != 2025) return;
+    UIView *root = [self view];
+    UITextField *old = (UITextField *)[root viewWithTag:7777];
+    if (old) [old removeFromSuperview];
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : @"lddgifbgSpeed"));
-    id cur = [ud objectForKey:key];
-    double dv = cur ? [cur doubleValue] : 0.0;
-    NSString *title = (tag == 2023 ? @"水平偏移数值" : (tag == 2024 ? @"垂直偏移数值" : @"播放速度数值"));
-    NSString *hint = (tag == 2025 ? @"输入 0.5 ~ 3.0 倍速" : @"输入 -200 ~ 200");
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:title message:hint preferredStyle:1];   // 1.9.154: 必须 Alert(1), ActionSheet(0) 不允许加输入框会崩
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *tf){
-        [tf setKeyboardType:4];
-        [tf setText:LDDInputNum(dv, (tag == 2025))];   // 1.9.156: 偏移整数, 速度去尾零
-    }];
-    UIAlertAction *ok = [UIAlertAction actionWithTitle:@"确定" style:0 handler:^(UIAlertAction *a){
-        id tfs = [ac textFields];
-        UITextField *tf = [tfs objectAtIndex:0];
+    id curV = [ud objectForKey:key];
+    double dv = curV ? [curV doubleValue] : 0.0;
+    CGRect rf = [root convertRect:[vl frame] fromView:[vl superview]];
+    if (rf.origin.y < 8) rf.origin.y = 8;
+    if (rf.size.width < 70) { rf.origin.x -= 20; rf.size.width = 90; }
+    UITextField *tf = [[UITextField alloc] initWithFrame:rf];
+    [tf setText:(tag == 2025 ? LDDInputNum(dv, 1) : LDDInputNum(dv, 0))];
+    [tf setTextAlignment:2];
+    [tf setFont:[UIFont systemFontOfSize:15.0]];
+    [tf setBorderStyle:3];     // 圆角边框, 与素材库改名一致
+    [tf setKeyboardType:0];    // 默认键盘(带完成键)
+    [tf setReturnKeyType:9];
+    [tf setTag:7777];
+    [tf addTarget:self action:@selector(inlineEditDone:) forControlEvents:(1 << 19)]; // EditingDidEndOnExit(按完成)
+    objc_setAssociatedObject(tf, &kLDDValTagKey, [NSNumber numberWithInteger:tag], 1);
+    [root addSubview:tf];
+    [tf becomeFirstResponder];
+}
+// 1.68: 内联输入提交(按完成或点其它行) —— 校验/入库/同步滑块和数值
+- (void)inlineEditDone:(UITextField *)tf {
+    @try {
+        NSNumber *tn = objc_getAssociatedObject(tf, &kLDDValTagKey);
+        NSInteger tag = tn ? [tn integerValue] : 0;
         NSString *txt = [tf text];
         double nv = [txt doubleValue];
         if (tag == 2025) {
@@ -1930,25 +1993,21 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             if (nv < -200) nv = -200;
             if (nv > 200) nv = 200;
         }
-        [ud setObject:[NSNumber numberWithDouble:nv] forKey:key];
-        [ud synchronize];
-        WritePrefsFile(key, [NSNumber numberWithDouble:nv]);
-        // 同步滑块
-        id cv = [vl superview];
-        if (cv) {
-            UISlider *sl = (UISlider *)[cv viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))];
-            if (sl) [sl setValue:nv];
+        if (tag == 2023 || tag == 2024 || tag == 2025) {
+            NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : @"lddgifbgSpeed"));
+            NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            [ud setObject:[NSNumber numberWithDouble:nv] forKey:key];
+            [ud synchronize];
+            WritePrefsFile(key, [NSNumber numberWithDouble:nv]);
+            id cv = [tf superview];
+            if (cv) {
+                UISlider *sl = (UISlider *)[cv viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))];
+                if (sl) [sl setValue:nv];
+            }
+            if (tag == 2023 || tag == 2024) LDDUpdatePreview();
         }
-        // 更新数值显示
-        if (tag == 2025) [(UILabel *)vl setText:[NSString stringWithFormat:@"%.1fx", nv]];
-        else [(UILabel *)vl setText:[NSString stringWithFormat:@"%.0f", nv]];
-        // 偏移输入后刷新预览
-        if (tag == 2023 || tag == 2024) LDDUpdatePreview();
-    }];
-    [ac addAction:ok];
-    UIAlertAction *cc = [UIAlertAction actionWithTitle:@"取消" style:1 handler:0];
-    [ac addAction:cc];
-    [self presentViewController:ac animated:YES completion:0];
+    } @catch (id e) { LogB("INLINE-EXC"); }
+    [tf removeFromSuperview];
 }
 - (void)testNotification {
     PostTestNotification();
