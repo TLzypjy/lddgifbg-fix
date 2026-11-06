@@ -481,7 +481,7 @@ static void WritePrefsFile(NSString *key, id value) {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     // 底: NSUserDefaults 全键 (面板写过的一定在)
     NSUserDefaults *ud0 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"SelectedMaterialFolder", nil]) {
+    for (NSString *k in [NSArray arrayWithObjects:@"Enablelddgifbg", @"lddgifbgSpeed", @"lddgifbgPosX", @"lddgifbgPosY", @"lddgifbgRandom", @"SelectedMaterialFolder", nil]) {
         id v = [ud0 objectForKey:k];
         if (v) [d setObject:v forKey:k];
     }
@@ -1536,7 +1536,14 @@ static void LDDNotifyMatChanged(void) {
 // 1.9.184: 行数 10 (版本/作者 移除, 改底部居中版权 footer)
 // 1.52 自用版: 行数 9 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
 // 1.50/1.51 的横幅样式/停留时长行已随崩溃钩子一并移除(见 main.mm 注释)
-- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 9; }
+// 1.66: 行数 10 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
+- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 10; }
+// 1.66: 素材随机模式名 (0关 1全部随机 2不重复随机)
+static NSString *LDDRandomName(long s) {
+    if (s == 1) return @"全部随机";
+    if (s == 2) return @"不重复";
+    return @"关";
+}
 // 1.9.156: 输入框预填值去小数 (偏移=整数, 速度=去尾零保留1位)
 static NSString *LDDInputNum(double v, BOOL isSpeed) {
     if (!isSpeed) return [NSString stringWithFormat:@"%.0f", v];
@@ -1584,7 +1591,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.65";
+    NSString *ver = @"1.66";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1754,12 +1761,29 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
+    } else if (row == 5) {
+        // 1.66: 素材随机 (点击循环: 关 -> 全部随机 -> 不重复随机)
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 130, 22)];
+        [label setText:@"素材随机"];
+        [label setFont:[UIFont systemFontOfSize:16.0]];
+        [[cell contentView] addSubview:label];
+        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 130, 19, 114, 22)];
+        [vv setTextAlignment:2];
+        [vv setFont:[UIFont systemFontOfSize:13.0]];
+        [vv setTextColor:[UIColor colorWithRed:0.0 green:0.45 blue:1.0 alpha:1.0]];
+        [vv setTag:2029];
+        NSUserDefaults *uds = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+        id sv = [uds objectForKey:@"lddgifbgRandom"];
+        long st = sv ? (long)[sv doubleValue] : 0;
+        [vv setText:LDDRandomName(st)];
+        [[cell contentView] addSubview:vv];
+        [cell setSelectionStyle:1];
     } else {
-        NSString *t = (row == 5 ? @"选择素材" : (row == 6 ? @"跳转素材目录" : (row == 7 ? @"预览通知" : @"立即注销")));
+        NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"跳转素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:16.0]];
-        if (row == 8) [label setTextColor:[UIColor redColor]];
+        if (row == 9) [label setTextColor:[UIColor redColor]];
         [[cell contentView] addSubview:label];
         [cell setSelectionStyle:1];
     }
@@ -1768,8 +1792,20 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
-    // 1.52 自用版: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
+    // 1.66: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
     if (row == 5) {
+        // 1.66: 循环切换素材随机模式
+        NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+        id v = [ud objectForKey:@"lddgifbgRandom"];
+        long s = v ? (long)[v doubleValue] : 0;
+        s = (s + 1) % 3;
+        [ud setObject:[NSNumber numberWithDouble:(double)s] forKey:@"lddgifbgRandom"];
+        [ud synchronize];
+        WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:(double)s]);
+        id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
+        if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(s)]; }
+        LogB("RANDOM-CYCLED");
+    } else if (row == 6) {
         // 1.48: 素材库改为推入式第二设置页(从右滑入, 系统 nav bar 原生返回), 不再用底部弹出 sheet;
         // 无导航栈时回退模态呈现。
         LDDMaterialPickerController *pc = [[LDDMaterialPickerController alloc] init];
@@ -1780,7 +1816,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pc];
             [self presentViewController:nav animated:YES completion:0];
         }
-    } else if (row == 6) {
+    } else if (row == 7) {
         // 1.64: 没装 Filza 时旧版静默无反应 -> 现在把路径复制到剪贴板并提示
         UIApplication *app = [UIApplication sharedApplication];
         NSURL *fz = [NSURL URLWithString:@"filza://view/var/mobile/lddgifbg"];
@@ -1790,9 +1826,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
                 [self showTip:@"未找到 Filza，素材目录路径已复制"];
             }
         }];
-    } else if (row == 7) {
-        [self showBannerPreview];
     } else if (row == 8) {
+        [self showBannerPreview];
+    } else if (row == 9) {
         [self respringNow];
     }
 }
