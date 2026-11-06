@@ -132,10 +132,6 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 + (id)URLWithString:(NSString *)s;
 - (NSString *)pathExtension;
 @end
-@interface UIPasteboard : NSObject
-+ (id)generalPasteboard;
-- (void)setString:(NSString *)s;
-@end
 @interface NSIndexPath : NSObject
 - (NSInteger)row;
 @end
@@ -1461,10 +1457,21 @@ static void LDDNotifyMatChanged(void) {
 - (void)valTapped:(UITapGestureRecognizer *)g;
 - (void)footerCopyTapped:(UITapGestureRecognizer *)g;
 - (void)footerCopyRestore:(NSTimer *)t;
+// 1.64: 跳转素材目录的 Filza 兜底提示
+- (void)showTip:(NSString *)msg;
 @end
 
 
 @implementation lddgifbgRootListController
+// 1.64: 根页面弹提示 (素材库页面的 showTip 是另一个类的, 这里需要自己的)
+- (void)showTip:(NSString *)msg {
+    @try {
+        UIAlertController *al = [UIAlertController alertControllerWithTitle:@"提示" message:msg preferredStyle:1];
+        UIAlertAction *ok = [UIAlertAction actionWithTitle:@"好" style:0 handler:0];
+        [al addAction:ok];
+        [self presentViewController:al animated:YES completion:0];
+    } @catch (id e) { LogB("ROOT-TIP-EXC"); }
+}
 - (void)showBannerPreview {
     @try {
         // 1.9.90: 只走文件通道(单通道)。此前双通道(文件+notify)在 SpringBoard 端
