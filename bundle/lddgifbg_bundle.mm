@@ -25,6 +25,8 @@ extern "C" void *dlopen(const char *path, int mode);
 extern "C" void *dlsym(void *handle, const char *symbol);
 // 1.56: 保存能力探测走实例方法表(respondsToSelector: 查类对象看不见实例方法, 曾致误报"不支持")
 extern "C" void *class_getInstanceMethod(void *cls, SEL name);
+// 1.58: UIImageWriteToSavedPhotosAlbum 是 C 函数(1.57 把它当类 objc_getClass 得 nil -> 消息发空对象=静默无效)
+extern "C" void UIImageWriteToSavedPhotosAlbum(void *image, void *target, SEL selector, void *contextInfo);
 extern "C" void CFRelease(void *cf);
 extern "C" void objc_setAssociatedObject(id obj, const char *key, id value, unsigned long policy);
 extern "C" id objc_getAssociatedObject(id obj, const char *key);
@@ -975,17 +977,13 @@ static int gDlMode = 0; // 1=fileURL(保动图) 2=imageURL 3=UIImage回退
                 ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u);
                 PwB("DL-REQ-FILEURL");
             } else if (mode == 2) {
-                id dict = ((id(*)(Class, SEL))objc_msgSend)((id)objc_getClass("NSDictionary"), sel_registerName("dictionary"));
-                id key = ((id(*)(Class, SEL, const char *))objc_msgSend)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "PHAssetMediaType");
-                (void)dict; (void)key;
                 ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromImageAtFileURL:"), u);
                 PwB("DL-REQ-IMGURL");
             } else {
-                // 回退: 用 ImageIO 解出 UIImage 再走完整尺寸保存(动图会静态化, 但绝不失败)
+                // 回退: 解出 UIImage 走系统 C 函数保存(1.57 误把它当类 -> objc_getClass 得 nil -> 静默无效)
                 id img = ((id(*)(Class, SEL, id))objc_msgSend)((id)objc_getClass("UIImage"), sel_registerName("imageWithContentsOfFile:"), p);
-                if (!img) { PwB("DL-NO-IMG"); return; }
-                ((void(*)(Class, SEL, id, id, SEL, id))objc_msgSend)((id)objc_getClass("UIImageWriteToSavedPhotosAlbum"),
-                    sel_registerName("class"), img, self, sel_registerName("image:didFinishSavingWithError:contextInfo:"), 0);
+                if (!img) { PwB("DL-NO-IMG"); [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
+                UIImageWriteToSavedPhotosAlbum((__bridge void *)img, (__bridge void *)self, sel_registerName("image:didFinishSavingWithError:contextInfo:"), 0);
                 PwB("DL-REQ-UIIMAGE");
             }
         } @catch (id e) {
@@ -1672,7 +1670,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.57";
+    NSString *ver = @"1.58";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
