@@ -97,7 +97,9 @@ extern "C" { extern void *kCGImagePropertyGIFDictionary; extern void *kCGImagePr
 @end
 @interface NSMutableArray : NSArray
 + (id)arrayWithCapacity:(NSUInteger)n;
++ (id)array;
 - (void)addObject:(id)obj;
+- (id)objectAtIndex:(NSUInteger)i;
 @end
 @interface NSData : NSObject
 + (id)dataWithContentsOfFile:(NSString *)p;
