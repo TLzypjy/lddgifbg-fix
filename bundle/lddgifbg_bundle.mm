@@ -1497,7 +1497,7 @@ static NSString *LDDInputNum(double v, BOOL isSpeed) {
 // 1.56: 固定高度改 52 -> 1.57: 用户指定 65pt
 static void LDDPreviewSize(double bw, double *piw, double *pih) {
     *piw = bw;
-    *pih = 65.0;
+    *pih = 70.0;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     if ([ip row] == 1) {
@@ -1532,7 +1532,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.59";
+    NSString *ver = @"1.60";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
