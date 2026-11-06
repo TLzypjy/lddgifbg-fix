@@ -1101,14 +1101,15 @@ static void LDDIslandLayout(id self) {
     [view setFrame:MakeRect(0, 0, b.w, b.h)];
     // 1.11: 容器是岛尺寸(40<=w<=460 && 10<=h<=150)就无条件挂到容器铺满 —— 1.9 要求"容器大于内容层"才挂,
     //   通知横幅/展开 容器≈内容层 未触发, 背景挂内容层被其可视区域裁成"左上角一小块"
-    // 1.59: BG-EXTEND 仅限通知横幅级岛(内容高>=60) —— 铺满整个药丸;
-    //   小岛(音乐条/直播条 h<60)一律不扩展、不换父层: 背景待在内容层 index0,
-    //   内容层里的系统图标(声音条/麦克风等)永远显示在背景之上, 不再被盖住。
+    // 1.60: BG-EXTEND 门槛提高到 75 —— 直播录制岛(141x63)不再扩展(63 曾过 60 门槛盖住
+    //   旁边状态图标); 只有真正的通知横幅(92pt)铺满整个药丸。
+    //   小岛(音乐条/直播条 h<75)一律不扩展、不换父层: 背景待在内容层 index0,
+    //   内容层里的系统图标永远显示在背景之上。
     {
         id supvB = [self superview];
         if (supvB) {
             CGRect sbB = [supvB bounds];
-            BOOL bannerSized = (b.h >= 60.0);
+            BOOL bannerSized = (b.h >= 75.0);
             BOOL islandish = (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 1200.0 && sbB.h <= 400.0 && sbB.h >= b.h);
             if (bannerSized && islandish) {
                 if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != supvB) {
@@ -1715,7 +1716,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.59");
+    ProbeWrite("LDD-BUILD v1.60");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
