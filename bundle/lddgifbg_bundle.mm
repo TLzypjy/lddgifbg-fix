@@ -1504,7 +1504,7 @@ static const char kLDDRandOptKey = 0;
 // 1.68: 选中一个随机模式
 - (void)randomOptTapped:(UIButton *)b {
     NSNumber *k = objc_getAssociatedObject(b, &kLDDRandOptKey);
-    long mode = k ? [k longValue] : 0;
+    long mode = k ? (long)[k doubleValue] : 0;
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithDouble:(double)mode] forKey:@"lddgifbgRandom"];
     [ud synchronize];
@@ -1521,9 +1521,9 @@ static const char kLDDRandOptKey = 0;
     CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
     CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
     double mw = 170.0, mh = 132.0;
-    double mx = vr.origin.x + vr.size.width - mw - 8.0;
+    double mx = vr.ox + vr.w - mw - 8.0;
     if (mx < 8) mx = 8;
-    double my = vr.origin.y + vr.size.height - 4.0;
+    double my = vr.oy + vr.h - 4.0;
     // 全屏透明遮罩(点空白关闭)
     UIView *mask = [[UIView alloc] initWithFrame:[root bounds]];
     [mask setTag:996];
@@ -1537,7 +1537,7 @@ static const char kLDDRandOptKey = 0;
     [[menu layer] setCornerRadius:12.0];
     [[menu layer] setMasksToBounds:YES];
     [[menu layer] setBorderWidth:1.0];
-    [[menu layer] setBorderColor:[UIColor colorWithWhite:0.82 alpha:1.0].CGColor];
+    [[menu layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.82 alpha:1.0] CGColor]];
     [root addSubview:menu];
     for (int k = 0; k < 3; k++) {
         UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 44.0, mw, 44.0)];
@@ -1846,7 +1846,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [vv setText:[NSString stringWithFormat:@"%@ ▾", LDDRandomName(st)]];
         // 1.68: 方框样式(边框+圆角), 同"通知上岛样式 标准 ▾"
         [[vv layer] setBorderWidth:1.0];
-        [[vv layer] setBorderColor:[UIColor colorWithWhite:0.72 alpha:1.0].CGColor];
+        [[vv layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.72 alpha:1.0] CGColor]];
         [[vv layer] setCornerRadius:10.0];
         [[vv layer] setMasksToBounds:YES];
         [[cell contentView] addSubview:vv];
@@ -1964,8 +1964,8 @@ static const char kLDDValTagKey = 0;
     id curV = [ud objectForKey:key];
     double dv = curV ? [curV doubleValue] : 0.0;
     CGRect rf = [root convertRect:[vl frame] fromView:[vl superview]];
-    if (rf.origin.y < 8) rf.origin.y = 8;
-    if (rf.size.width < 70) { rf.origin.x -= 20; rf.size.width = 90; }
+    if (rf.oy < 8) rf.oy = 8;
+    if (rf.w < 70) { rf.ox -= 20; rf.w = 90; }
     UITextField *tf = [[UITextField alloc] initWithFrame:rf];
     [tf setText:(tag == 2025 ? LDDInputNum(dv, 1) : LDDInputNum(dv, 0))];
     [tf setTextAlignment:2];
