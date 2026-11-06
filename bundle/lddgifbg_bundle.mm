@@ -499,10 +499,9 @@ static void WritePrefsFile(NSString *key, id value) {
 }
 
 // ---------- 日志(诊断) ----------
-// 1.65: 日志位置挪到素材目录(二进制里不再出现 /var/jb 绝对路径, 减少 RootHide 转换提示)
+// 1.67: 按用户要求只保留 __plugin_probe__.txt —— bundle 日志文件不再生成(空函数保留调用点)
 static void LogB(const char *s) {
-    FILE *f = fopen("/var/mobile/lddgifbg/__bundle_log__.txt", "a");
-    if (f) { fprintf(f, "%s\n", s ? s : "?"); fflush(f); fclose(f); }
+    (void)s;
 }
 // 素材库布局探针: 写入用户可直接回传的 __plugin_probe__.txt (与主逻辑 ProbeWrite 同文件)
 // 1.47: 与主插件同款按行滚动裁剪 —— 超过 1000 行保留最新 900 行
@@ -1591,7 +1590,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.66";
+    NSString *ver = @"1.67";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1678,11 +1677,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LDDUpdatePreview();
     } else if (row == 2) {
         // 1.9.140: 水平偏移 (左右调整显示区域, -200~200, 默认0)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
         [label setText:@"水平偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1694,7 +1693,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(posXChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2023];
@@ -1706,11 +1705,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[cell contentView] addSubview:vl];
     } else if (row == 3) {
         // 1.9.140: 垂直偏移 (上下调整显示区域, -200~200, 默认0)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
         [label setText:@"垂直偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1722,7 +1721,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(posYChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2024];
@@ -1734,11 +1733,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[cell contentView] addSubview:vl];
     } else if (row == 4) {
         // 1.9.133: 播放速度滑块 (0.5x~2.0x)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 8, b.w - 32, 20)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
         [label setText:@"播放速度"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(16, 30, b.w - 108, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
         [sl setMinimumValue:0.5];
         [sl setMaximumValue:3.0];   // 1.9.152: 支持到三倍速
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1751,7 +1750,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(speedChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值 (倍速)
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 92, 33, 76, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2025];
@@ -1794,17 +1793,38 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
     // 1.66: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
     if (row == 5) {
-        // 1.66: 循环切换素材随机模式
+        // 1.67: 点击弹出选择框(同灵动通知交互), 不再循环切换
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id v = [ud objectForKey:@"lddgifbgRandom"];
-        long s = v ? (long)[v doubleValue] : 0;
-        s = (s + 1) % 3;
-        [ud setObject:[NSNumber numberWithDouble:(double)s] forKey:@"lddgifbgRandom"];
-        [ud synchronize];
-        WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:(double)s]);
-        id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
-        if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(s)]; }
-        LogB("RANDOM-CYCLED");
+        long cur = v ? (long)[v doubleValue] : 0;
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"素材随机" message:@"来通知时的素材选取方式" preferredStyle:1];
+        UIAlertAction *a0 = [UIAlertAction actionWithTitle:(cur == 0 ? @"✓ 关" : @"关") style:0 handler:^(UIAlertAction *a){
+            [ud setObject:[NSNumber numberWithDouble:0] forKey:@"lddgifbgRandom"];
+            [ud synchronize];
+            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:0]);
+            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
+            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(0)]; }
+        }];
+        [ac addAction:a0];
+        UIAlertAction *a1 = [UIAlertAction actionWithTitle:(cur == 1 ? @"✓ 全部随机" : @"全部随机") style:0 handler:^(UIAlertAction *a){
+            [ud setObject:[NSNumber numberWithDouble:1] forKey:@"lddgifbgRandom"];
+            [ud synchronize];
+            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:1]);
+            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
+            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(1)]; }
+        }];
+        [ac addAction:a1];
+        UIAlertAction *a2 = [UIAlertAction actionWithTitle:(cur == 2 ? @"✓ 不重复随机" : @"不重复随机") style:0 handler:^(UIAlertAction *a){
+            [ud setObject:[NSNumber numberWithDouble:2] forKey:@"lddgifbgRandom"];
+            [ud synchronize];
+            WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:2]);
+            id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
+            if (cell) { UILabel *vv = (UILabel *)[cell viewWithTag:2029]; if (vv) [vv setText:LDDRandomName(2)]; }
+        }];
+        [ac addAction:a2];
+        UIAlertAction *cc = [UIAlertAction actionWithTitle:@"取消" style:1 handler:0];
+        [ac addAction:cc];
+        [self presentViewController:ac animated:YES completion:0];
     } else if (row == 6) {
         // 1.48: 素材库改为推入式第二设置页(从右滑入, 系统 nav bar 原生返回), 不再用底部弹出 sheet;
         // 无导航栈时回退模态呈现。
