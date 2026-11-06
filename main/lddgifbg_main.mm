@@ -723,6 +723,12 @@ static void ConsumeForcePreview(void) {
     const char *fp = "/var/mobile/lddgifbg/__force_preview__";
     if (access(fp, 0) != 0) return;
     rename(fp, "/var/mobile/lddgifbg/__force_preview__.consumed");
+    // 1.57: 预览通知前强制作废素材缓存 —— 用户切完素材马上点预览时, 2s 缓存里还是旧路径,
+    // 表现为"预览弹出来的还是老素材, 要等十几秒"(旧缓存过期 + 通知生命周期)才换过来。
+    gMatChangedFlag = 0;
+    gPickCache = nil;
+    gPickCacheTs = 0;
+    ProbeWrite("PREVIEW-CACHE-BUST");
     PostRealNotification();
 }
 static void CheckForcePreviewTick(void) {
@@ -1095,18 +1101,24 @@ static void LDDIslandLayout(id self) {
     [view setFrame:MakeRect(0, 0, b.w, b.h)];
     // 1.11: 容器是岛尺寸(40<=w<=460 && 10<=h<=150)就无条件挂到容器铺满 —— 1.9 要求"容器大于内容层"才挂,
     //   通知横幅/展开 容器≈内容层 未触发, 背景挂内容层被其可视区域裁成"左上角一小块"
+    // 1.57: 直播音频岛的容器可能是 407x92 的大条(宽高都超出旧阈值 460/150 之外的情形另有),
+    // 旧判定 40..460 x 10..150 太窄 -> 直播岛背景只铺在内容层(被裁成中间一条) = "没铺满"。
+    // 放宽到 40..1200 x 10..400, 并额外要求比当前内容层大才挂父层。
     {
         id supvB = [self superview];
         if (supvB) {
             CGRect sbB = [supvB bounds];
-            if (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 460.0 && sbB.h <= 150.0) {
+            BOOL islandish = (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 1200.0 && sbB.h <= 400.0);
+            BOOL bigger = (sbB.w > b.w + 1.0 || sbB.h > b.h + 1.0);
+            if (islandish && bigger) {
                 if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != supvB) {
                     [view removeFromSuperview];
                     [supvB insertSubview:view atIndex:0];
+                    ProbeWrite("BG-EXTEND-REPARENT");
                 }
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
-                if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
+                if (bgx < 12) { bgx++; char bb[96]; snprintf(bb, sizeof(bb), "BG-EXTEND %.0fx%.0f from %.0fx%.0f", sbB.w, sbB.h, b.w, b.h); ProbeWrite(bb); }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
@@ -1703,7 +1715,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.56");
+    ProbeWrite("LDD-BUILD v1.57");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
