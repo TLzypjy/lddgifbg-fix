@@ -1101,16 +1101,18 @@ static void LDDIslandLayout(id self) {
     [view setFrame:MakeRect(0, 0, b.w, b.h)];
     // 1.11: 容器是岛尺寸(40<=w<=460 && 10<=h<=150)就无条件挂到容器铺满 —— 1.9 要求"容器大于内容层"才挂,
     //   通知横幅/展开 容器≈内容层 未触发, 背景挂内容层被其可视区域裁成"左上角一小块"
-    // 1.57: 直播音频岛的容器可能是 407x92 的大条(宽高都超出旧阈值 460/150 之外的情形另有),
-    // 旧判定 40..460 x 10..150 太窄 -> 直播岛背景只铺在内容层(被裁成中间一条) = "没铺满"。
-    // 放宽到 40..1200 x 10..400, 并额外要求比当前内容层大才挂父层。
+    // 1.58: BG-EXTEND 只在两种情况生效(紧凑音乐岛 内容125x37/父151x44 两者都不满足,
+    //   不再把背景撑进图标区遮住右侧声音条):
+    //   a) 父容器是横幅级高(60..150) —— 通知横幅铺满整个药丸;
+    //   b) 父容器紧贴内容层(四边差 <16pt) —— 直播条补齐边缘留白。
     {
         id supvB = [self superview];
         if (supvB) {
             CGRect sbB = [supvB bounds];
             BOOL islandish = (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 1200.0 && sbB.h <= 400.0);
-            BOOL bigger = (sbB.w > b.w + 1.0 || sbB.h > b.h + 1.0);
-            if (islandish && bigger) {
+            BOOL bannerPlatter = (sbB.h >= 60.0 && sbB.h <= 150.0);
+            BOOL hugs = (sbB.w >= b.w && sbB.h >= b.h && (sbB.w - b.w) < 16.0 && (sbB.h - b.h) < 16.0);
+            if (islandish && (bannerPlatter || hugs)) {
                 if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != supvB) {
                     [view removeFromSuperview];
                     [supvB insertSubview:view atIndex:0];
@@ -1715,7 +1717,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.57");
+    ProbeWrite("LDD-BUILD v1.58");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
