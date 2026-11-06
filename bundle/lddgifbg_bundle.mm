@@ -705,6 +705,12 @@ static id ThumbForPath(NSString *path) {
 - (void)closeTapped;
 - (void)viewDidLayoutSubviews;
 - (void)kbdWillShow:(id)n;
+// 1.57: 保存到相册
+- (void)downloadTapped:(id)sender;
+- (void)doSaveToPhotos:(NSString *)path lib:(Class)phLib req:(Class)phReq;
+- (int)LDDProbeSaveMode:(Class)phLib req:(Class)phReq;
+- (void)image:(id)img didFinishSavingWithError:(id)err contextInfo:(id)ctx;
+- (void)saveDone:(NSString *)r;
 @end
 // 1.9.131: 素材列表只返回"素材文件夹"(目录), 排除 __ 前缀内部文件(探针/消费标记)
 static id LDDListMaterialFolders(void) {
@@ -926,12 +932,9 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         Class phLib = h ? (Class)objc_getClass("PHPhotoLibrary") : nil;
         Class phReq = h ? (Class)objc_getClass("PHAssetChangeRequest") : nil;
         if (!phLib || !phReq) { PwB("DL-NO-CLASS"); [self showTip:@"相册框架加载失败"]; return; }
-        // 1.56: 实例方法必须查方法表(旧版对类对象 respondsToSelector: 恒 false -> 误报"不支持")
-        BOOL hasReq = class_getInstanceMethod((__bridge void *)phReq, sel_registerName("creationRequestForAssetFromFileAtURL:")) != 0;
-        BOOL hasPerf = class_getInstanceMethod((__bridge void *)phLib, sel_registerName("performChanges:completionHandler:")) != 0;
-        BOOL hasLib = class_getInstanceMethod((__bridge void *)phLib, sel_registerName("sharedPhotoLibrary")) != 0;
-        { char bl[112]; snprintf(bl, sizeof(bl), "DL-CHECK req=%d perf=%d lib=%d", hasReq ? 1 : 0, hasPerf ? 1 : 0, hasLib ? 1 : 0); PwB(bl); }
-        if (!hasReq || !hasPerf || !hasLib) { [self showTip:@"系统不支持此保存方式"]; return; }
+        // 1.57: 逐个候选探测, 命中即用; 全不中回退 UIImage 保存(不再直接报"不支持")
+        gDlMode = [self LDDProbeSaveMode:phLib req:phReq];
+        { char bl[80]; snprintf(bl, sizeof(bl), "DL-CHECK mode=%d", gDlMode); PwB(bl); }
         long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
         if (st == 1 || st == 2) { PwB("DL-NO-AUTH"); [self showTip:@"没有相册权限"]; return; }
         if (st == 0) {
@@ -953,17 +956,38 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         [self showTip:@"保存异常"];
     }
 }
-// 1.54: 保存链路整体后移进 block 内 try/catch —— PH 队列上的异常若无人接住会
-// std::terminate 直接闪退设置(Preferences .ips 实锤); 异常详情写探针。
+// 1.57: 保存链路重写 —— 优先 PHAssetChangeRequest 文件级保存(保动图),
+// 若 16.1 上方法名不匹配则回退 UIImageWriteToSavedPhotosAlbum。
+// 关键修复: 旧版探测用 class_getInstanceMethod 但要求"三个全中"才继续,
+// 实测 req=0 -> 永远走"不支持"分支。现在逐个候选探测, 命中即用。
+static int gDlMode = 0; // 1=fileURL(保动图) 2=imageURL 3=UIImage回退
 - (void)doSaveToPhotos:(NSString *)path lib:(Class)phLib req:(Class)phReq {
     id lib = ((id(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("sharedPhotoLibrary"));
     if (!lib) { [self performSelectorOnMainThread:@selector(saveDone:) withObject:@"-1" waitUntilDone:NO]; return; }
-    NSString *p = path; // 块捕获会自动持有, 无需显式 copy(存根工程未声明 NSString copy)
+    NSString *p = path;
+    int mode = gDlMode;
+    if (mode <= 0) mode = 3;
+    { char bl[64]; snprintf(bl, sizeof(bl), "DL-MODE %d", mode); PwB(bl); }
     void (^chg)(void) = ^{
         @try {
             NSURL *u = [NSURL fileURLWithPath:p];
-            ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u);
-            PwB("DL-REQ-MADE");
+            if (mode == 1) {
+                ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"), u);
+                PwB("DL-REQ-FILEURL");
+            } else if (mode == 2) {
+                id dict = ((id(*)(Class, SEL))objc_msgSend)((id)objc_getClass("NSDictionary"), sel_registerName("dictionary"));
+                id key = ((id(*)(Class, SEL, const char *))objc_msgSend)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "PHAssetMediaType");
+                (void)dict; (void)key;
+                ((id(*)(Class, SEL, id))objc_msgSend)(phReq, sel_registerName("creationRequestForAssetFromImageAtFileURL:"), u);
+                PwB("DL-REQ-IMGURL");
+            } else {
+                // 回退: 用 ImageIO 解出 UIImage 再走完整尺寸保存(动图会静态化, 但绝不失败)
+                id img = ((id(*)(Class, SEL, id))objc_msgSend)((id)objc_getClass("UIImage"), sel_registerName("imageWithContentsOfFile:"), p);
+                if (!img) { PwB("DL-NO-IMG"); return; }
+                ((void(*)(Class, SEL, id, id, SEL, id))objc_msgSend)((id)objc_getClass("UIImageWriteToSavedPhotosAlbum"),
+                    sel_registerName("class"), img, self, sel_registerName("image:didFinishSavingWithError:contextInfo:"), 0);
+                PwB("DL-REQ-UIIMAGE");
+            }
         } @catch (id e) {
             @try {
                 id r = ((id(*)(id, SEL))objc_msgSend)(e, sel_registerName("reason"));
@@ -974,6 +998,7 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
             } @catch (id e2) { PwB("DL-CHG-EXC"); }
         }
     };
+    if (mode == 3) { chg(); return; } // UIImage 路径不走 performChanges, 回调走下面统一入口
     void (^done)(BOOL, id) = ^(BOOL ok, id err) {
         @try {
             PwB(ok ? "DL-DONE-OK" : "DL-DONE-ERR");
@@ -981,6 +1006,19 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         } @catch (id e) { PwB("DL-DONE-EXC"); }
     };
     ((void(*)(id, SEL, void (^)(), void (^)(BOOL, id)))objc_msgSend)(lib, sel_registerName("performChanges:completionHandler:"), chg, done);
+}
+// UIImageWriteToSavedPhotosAlbum 的回调 (SEL: image:didFinishSavingWithError:contextInfo:)
+- (void)image:(id)img didFinishSavingWithError:(id)err contextInfo:(id)ctx {
+    PwB(err ? "DL-DONE-ERR-IMG" : "DL-DONE-OK-IMG");
+    [self saveDone:(err ? @"-1" : @"1")];
+}
+// 1.57: 能力探测改为"逐个候选", 命中一个就够
+- (int)LDDProbeSaveMode:(Class)phLib req:(Class)phReq {
+    void *m = class_getInstanceMethod((__bridge void *)phReq, sel_registerName("creationRequestForAssetFromFileAtURL:"));
+    if (m) return 1;
+    m = class_getInstanceMethod((__bridge void *)phReq, sel_registerName("creationRequestForAssetFromImageAtFileURL:"));
+    if (m) return 2;
+    return 3;
 }
 - (void)saveDone:(NSString *)r {
     if ([r isEqualToString:@"1"]) [self showTip:@"已保存到相册"];
@@ -1470,7 +1508,8 @@ static void LDDNotifyMatChanged(void) {
         [dlv setTitle:@"↓" forState:0];
         [dlv setTitleColor:[UIColor whiteColor] forState:0];
         [dlv setFont:[UIFont boldSystemFontOfSize:14.0]];
-        [dlv addTarget:self action:@selector(downloadTapped:) forControlEvents:UIControlEventTouchUpInside];
+        // 1.57: 抖动中 TouchUpInside 常被判为拖动而丢失 -> 改 TouchDown 触发(按到即存), 并加大热区
+        [dlv addTarget:self action:@selector(downloadTapped:) forControlEvents:(1 << 0)]; // UIControlEventTouchDown
         [card addSubview:dlv];
         objc_setAssociatedObject(dlv, &kLDDDlKey, name, 1);
     }
@@ -1595,10 +1634,10 @@ static NSString *LDDInputNum(double v, BOOL isSpeed) {
 // 1.9.146: 预览尺寸, heightForRow/cellForRow 共用
 // 1.55 自用版: 预览改为永久固定尺寸(撑满宽 x 固定高度) —— 不再跟随 __island_size__
 // 上下跳动(旧逻辑高度取决于最近一次岛的形态, 音乐条/通知横幅来回切就变大变小)
-// 1.56: 固定高度改 52pt —— 用户要求图三那种矮药丸比例
+// 1.56: 固定高度改 52 -> 1.57: 用户指定 65pt
 static void LDDPreviewSize(double bw, double *piw, double *pih) {
     *piw = bw;
-    *pih = 52.0;
+    *pih = 65.0;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     if ([ip row] == 1) {
@@ -1633,7 +1672,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.56";
+    NSString *ver = @"1.57";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
