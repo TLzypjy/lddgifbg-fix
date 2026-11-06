@@ -821,6 +821,20 @@ static id LDDListMaterialFolders(void) {
             [fl invalidateLayout];
             { char bl[160]; snprintf(bl, sizeof(bl), "MAT-FORCED item=%.2f inter=0", want); PwB(bl); }
         }
+        // 1.63: 页面最底部居中用法说明
+        UIView *root = [self view];
+        UILabel *hint = (UILabel *)[root viewWithTag:977];
+        if (!hint) {
+            hint = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 10, 10)];
+            [hint setTag:977];
+            [hint setText:@"长按进入编辑状态，支持改名 / 删除"];
+            [hint setFont:[UIFont systemFontOfSize:12.0]];
+            [hint setTextAlignment:1];
+            [hint setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
+            [root addSubview:hint];
+        }
+        CGRect rb = [root bounds];
+        [hint setFrame:MakeRect(0, rb.h - 34.0, rb.w, 18.0)];
     } @catch (id e) { LogB("MAT-RELAYOUT-EXC"); }
 }
 - (void)closeTapped {
@@ -1305,9 +1319,14 @@ static void LDDNotifyMatChanged(void) {
     double cardW = w - 12.0;
     double imgH = cardW;
     {
-        char bl[160];
-        snprintf(bl, sizeof(bl), "MAT-CELL row=%ld w=%.2f cardW=%.2f", (long)row, w, cardW);
-        PwB(bl);
+        // 1.63: 探针限流 —— 每次刷新 12 行 × N 轮刷屏
+        static int mc = 0;
+        if (mc < 24) {
+            mc++;
+            char bl[160];
+            snprintf(bl, sizeof(bl), "MAT-CELL row=%ld w=%.2f cardW=%.2f", (long)row, w, cardW);
+            PwB(bl);
+        }
     }
     // 白色圆角卡片 + 图 (卡片不裁切, 让删除钮可盖住并伸出右上角; 图片圆角由 iv 自己裁切)
     UIView *card = [[UIView alloc] initWithFrame:MakeRect(6, 0, cardW, imgH)];
@@ -1532,7 +1551,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.62";
+    NSString *ver = @"1.63";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
