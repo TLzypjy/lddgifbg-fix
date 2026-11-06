@@ -3,11 +3,11 @@ export ARCHS = arm64 arm64e
 export TARGET = iphone:clang:latest:15.0
 export DEBUG = 0
 
-TWEAK_NAME = 灵动岛GIF背景
-灵动岛GIF背景_FILES = main/lddgifbg_main.mm
-灵动岛GIF背景_CFLAGS = -fobjc-arc -Wno-unused-function
-灵动岛GIF背景_FRAMEWORKS = ImageIO UIKit
-灵动岛GIF背景_LDFLAGS = -lsubstrate
+TWEAK_NAME = 灵动岛背景美化
+灵动岛背景美化_FILES = main/lddgifbg_main.mm
+灵动岛背景美化_CFLAGS = -fobjc-arc -Wno-unused-function
+灵动岛背景美化_FRAMEWORKS = ImageIO UIKit
+灵动岛背景美化_LDFLAGS = -lsubstrate
 
 BUNDLE_NAME = lddgifbg
 lddgifbg_FILES = bundle/lddgifbg_bundle.mm
