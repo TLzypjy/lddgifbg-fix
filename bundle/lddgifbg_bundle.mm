@@ -23,6 +23,8 @@ extern "C" id objc_getClass(const char *name);
 extern "C" SEL sel_registerName(const char *name);
 extern "C" void *dlopen(const char *path, int mode);
 extern "C" void *dlsym(void *handle, const char *symbol);
+// 1.56: 保存能力探测走实例方法表(respondsToSelector: 查类对象看不见实例方法, 曾致误报"不支持")
+extern "C" void *class_getInstanceMethod(void *cls, SEL name);
 extern "C" void CFRelease(void *cf);
 extern "C" void objc_setAssociatedObject(id obj, const char *key, id value, unsigned long policy);
 extern "C" id objc_getAssociatedObject(id obj, const char *key);
@@ -924,11 +926,12 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         Class phLib = h ? (Class)objc_getClass("PHPhotoLibrary") : nil;
         Class phReq = h ? (Class)objc_getClass("PHAssetChangeRequest") : nil;
         if (!phLib || !phReq) { PwB("DL-NO-CLASS"); [self showTip:@"相册框架加载失败"]; return; }
-        // 1.54: 先核实选择器真实存在(1.53 崩溃 = PH 后台队列里未接住的异常, 先探后调)
-        BOOL hasReq = ((BOOL(*)(id, SEL, SEL))objc_msgSend)(phReq, sel_registerName("respondsToSelector:"), sel_registerName("creationRequestForAssetFromFileAtURL:"));
-        BOOL hasPerf = ((BOOL(*)(id, SEL, SEL))objc_msgSend)(phLib, sel_registerName("respondsToSelector:"), sel_registerName("performChanges:completionHandler:"));
-        { char bl[96]; snprintf(bl, sizeof(bl), "DL-CHECK req=%d perf=%d", hasReq ? 1 : 0, hasPerf ? 1 : 0); PwB(bl); }
-        if (!hasReq || !hasPerf) { [self showTip:@"系统不支持此保存方式"]; return; }
+        // 1.56: 实例方法必须查方法表(旧版对类对象 respondsToSelector: 恒 false -> 误报"不支持")
+        BOOL hasReq = class_getInstanceMethod((void *)phReq, sel_registerName("creationRequestForAssetFromFileAtURL:")) != 0;
+        BOOL hasPerf = class_getInstanceMethod((void *)phLib, sel_registerName("performChanges:completionHandler:")) != 0;
+        BOOL hasLib = class_getInstanceMethod((void *)phLib, sel_registerName("sharedPhotoLibrary")) != 0;
+        { char bl[112]; snprintf(bl, sizeof(bl), "DL-CHECK req=%d perf=%d lib=%d", hasReq ? 1 : 0, hasPerf ? 1 : 0, hasLib ? 1 : 0); PwB(bl); }
+        if (!hasReq || !hasPerf || !hasLib) { [self showTip:@"系统不支持此保存方式"]; return; }
         long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
         if (st == 1 || st == 2) { PwB("DL-NO-AUTH"); [self showTip:@"没有相册权限"]; return; }
         if (st == 0) {
@@ -1514,6 +1517,13 @@ static void LDDNotifyMatChanged(void) {
     [(UICollectionView *)cv reloadData];
     // 1.9.144: 通知设置页刷新预览 (不依赖 viewWillAppear)
     [[NSNotificationCenter defaultCenter] postNotificationName:@"LDDMatChanged" object:0];
+    // 1.56: 点卡片切素材同样广播(旧版只写 prefs 不广播, SpringBoard 侧 2s 缓存不失效 -> 切了没反应)
+    {
+        const char *nc = ((const char *(*)(id, SEL))objc_msgSend)(name, sel_registerName("UTF8String"));
+        char bl[192]; snprintf(bl, sizeof(bl), "MAT-SELECT %s", nc ? nc : "?");
+        PwB(bl);
+    }
+    LDDNotifyMatChanged();
 }
 @end
 
@@ -1583,11 +1593,12 @@ static NSString *LDDInputNum(double v, BOOL isSpeed) {
     return [NSString stringWithFormat:@"%.1f", v];
 }
 // 1.9.146: 预览尺寸, heightForRow/cellForRow 共用
-// 1.55 自用版: 预览改为永久固定尺寸(撑满宽 x 固定 92pt) —— 不再跟随 __island_size__
+// 1.55 自用版: 预览改为永久固定尺寸(撑满宽 x 固定高度) —— 不再跟随 __island_size__
 // 上下跳动(旧逻辑高度取决于最近一次岛的形态, 音乐条/通知横幅来回切就变大变小)
+// 1.56: 固定高度改 52pt —— 用户要求图三那种矮药丸比例
 static void LDDPreviewSize(double bw, double *piw, double *pih) {
     *piw = bw;
-    *pih = 92.0;
+    *pih = 52.0;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     if ([ip row] == 1) {
@@ -1622,7 +1633,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.55";
+    NSString *ver = @"1.56";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
