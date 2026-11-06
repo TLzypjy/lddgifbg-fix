@@ -430,6 +430,54 @@ static void ProbeWrite(const char *line) {
 }
 
 // ---------- 素材选择: gif > 视频 > 静态图 ----------
+// 1.66: 素材随机 —— cRandom 1=全部随机 2=不重复随机(不与当前选中相同); 0=关
+static int cRandom = 0;
+static double gLastRollTs = 0;
+static NSString *gRollPath = nil;
+static NSString *GetRandomImagePath(int noRepeat) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = @"/var/mobile/lddgifbg";
+    NSArray *all = [fm contentsOfDirectoryAtPath:root error:nil];
+    NSMutableArray *dirs = [NSMutableArray array];
+    NSString *cur = LoadPrefsValue(gPrefsKeyFolder);
+    for (NSString *nm in all) {
+        if (((BOOL(*)(id, SEL, id))objc_msgSend)(nm, sel_registerName("hasPrefix:"), @"__")) continue;
+        NSString *fp = [root stringByAppendingPathComponent:nm];
+        BOOL isD = NO;
+        if (![fm fileExistsAtPath:fp isDirectory:&isD] || !isD) continue;
+        if (noRepeat && cur && [nm isEqualToString:cur]) continue; // 不重复模式跳过当前选中
+        NSArray *fs = [fm contentsOfDirectoryAtPath:fp error:nil];
+        BOOL hasMedia = NO;
+        for (NSString *f in fs) {
+            NSString *ext = [[f pathExtension] lowercaseString];
+            if ([ext isEqualToString:@"gif"] || [ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"] ||
+                [ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) { hasMedia = YES; break; }
+        }
+        if (hasMedia) [dirs addObject:nm];
+    }
+    NSInteger n = (NSInteger)[dirs count];
+    if (n == 0) return nil;
+    NSString *pick = nil;
+    for (int attempt = 0; attempt < 8; attempt++) {
+        pick = [dirs objectAtIndex:(NSUInteger)arc4random_uniform((u_int32_t)n)];
+        if (!(noRepeat && cur && [pick isEqualToString:cur])) break; // 双保险
+    }
+    NSString *folder = [root stringByAppendingPathComponent:pick];
+    NSArray *fs = [fm contentsOfDirectoryAtPath:folder error:nil];
+    NSString *gif = nil, *vid = nil, *img = nil;
+    for (NSString *f in fs) {
+        NSString *ext = [[f pathExtension] lowercaseString];
+        if (!gif && [ext isEqualToString:@"gif"]) gif = [folder stringByAppendingPathComponent:f];
+        else if (!vid && ([ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"])) vid = [folder stringByAppendingPathComponent:f];
+        else if (!img && ([ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])) img = [folder stringByAppendingPathComponent:f];
+    }
+    NSString *out = gif ? gif : (vid ? vid : img);
+    if (out) {
+        const char *oc = ((const char *(*)(id, SEL))objc_msgSend)(out, sel_registerName("UTF8String"));
+        char ml[224]; snprintf(ml, sizeof(ml), "MAT-ROLL-PICK %.200s", oc ? oc : "?"); ProbeWrite(ml);
+    }
+    return out;
+}
 // 1.55: 素材路径缓存提到文件域 —— 设置页切换素材后经 Darwin 通知置 gMatChangedFlag,
 // 立即作废缓存重新扫描, 新素材"来通知立马生效"(不再等 2 秒缓存自然过期)
 static NSString *gPickCache = nil;
@@ -788,6 +836,8 @@ static void RefreshPrefsCache(void) {
     cPosX = GetLddGifBgPos(gPrefsKeyPosX, 0.0);
     cPosY = GetLddGifBgPos(gPrefsKeyPosY, 0.0);
     cSpeed = GetLddGifBgSpeed();
+    // 1.66: 素材随机模式 (0=关 1=全部随机 2=不重复随机)
+    { id v = LoadPrefsValue(@"lddgifbgRandom"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 2) d = 0.0; cRandom = (int)d; }
     // 1.9.172: 素材目录扫描移出 0.5s 节流(原实现每 0.5s 扫目录=CPU元凶), 改为 SHOW-1 路径按 2s 缓存调用
     // 1.9.133: 速度变化即时生效 —— GIF 重启定时器, 视频更新 rate
     if (gLastAppliedSpeed != cSpeed) {
@@ -1083,6 +1133,19 @@ static void LDDIslandLayout(id self) {
             path = GetSelectedImagePath();
             gPickCache = path;
             gPickCacheTs = nowT2;
+        }
+        // 1.66: 素材随机 —— 每次新通知弹出(横幅高>=50 且距上次抽取>3s)随机换素材;
+        // 同一通知的后续布局帧不重抽, 音乐小岛(h<50)沿用上一次结果。
+        if (cRandom > 0) {
+            double nowR = CFAbsoluteTimeGetCurrent();
+            if (bb.h >= 50.0 && (nowR - gLastRollTs) > 3.0) {
+                gLastRollTs = nowR;
+                NSString *rp = GetRandomImagePath(cRandom == 2);
+                if (rp) { gRollPath = rp; ProbeWrite("MAT-ROLL"); }
+            }
+            if (gRollPath && [[NSFileManager defaultManager] fileExistsAtPath:gRollPath]) {
+                path = gRollPath;
+            }
         }
     }
     if (!path) {
@@ -1725,7 +1788,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.65");
+    ProbeWrite("LDD-BUILD v1.66");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
