@@ -1101,25 +1101,21 @@ static void LDDIslandLayout(id self) {
     [view setFrame:MakeRect(0, 0, b.w, b.h)];
     // 1.11: 容器是岛尺寸(40<=w<=460 && 10<=h<=150)就无条件挂到容器铺满 —— 1.9 要求"容器大于内容层"才挂,
     //   通知横幅/展开 容器≈内容层 未触发, 背景挂内容层被其可视区域裁成"左上角一小块"
-    // 1.60: BG-EXTEND 门槛提高到 75 —— 直播录制岛(141x63)不再扩展(63 曾过 60 门槛盖住
-    //   旁边状态图标); 只有真正的通知横幅(92pt)铺满整个药丸。
-    //   小岛(音乐条/直播条 h<75)一律不扩展、不换父层: 背景待在内容层 index0,
-    //   内容层里的系统图标永远显示在背景之上。
+    // 1.61: BG-EXTEND 判定原样恢复 1.52(=1.48) 版本 —— 用户实测 1.52 不遮系统图标:
+    //   父容器在 40..460 x 10..150 范围内即挂到父层铺满, 其余维持原样。
+    //   (1.55~1.60 的各种门槛变体全部弃用)
     {
         id supvB = [self superview];
         if (supvB) {
             CGRect sbB = [supvB bounds];
-            BOOL bannerSized = (b.h >= 75.0);
-            BOOL islandish = (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 1200.0 && sbB.h <= 400.0 && sbB.h >= b.h);
-            if (bannerSized && islandish) {
+            if (sbB.w >= 40.0 && sbB.h >= 10.0 && sbB.w <= 460.0 && sbB.h <= 150.0) {
                 if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != supvB) {
                     [view removeFromSuperview];
                     [supvB insertSubview:view atIndex:0];
-                    ProbeWrite("BG-EXTEND-REPARENT");
                 }
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
-                if (bgx < 12) { bgx++; char bb[96]; snprintf(bb, sizeof(bb), "BG-EXTEND %.0fx%.0f from %.0fx%.0f", sbB.w, sbB.h, b.w, b.h); ProbeWrite(bb); }
+                if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
@@ -1716,7 +1712,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.60");
+    ProbeWrite("LDD-BUILD v1.61");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
