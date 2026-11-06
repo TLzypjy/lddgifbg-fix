@@ -927,9 +927,9 @@ static NSString *LDDMediaFileInFolder(NSString *folderName) {
         Class phReq = h ? (Class)objc_getClass("PHAssetChangeRequest") : nil;
         if (!phLib || !phReq) { PwB("DL-NO-CLASS"); [self showTip:@"相册框架加载失败"]; return; }
         // 1.56: 实例方法必须查方法表(旧版对类对象 respondsToSelector: 恒 false -> 误报"不支持")
-        BOOL hasReq = class_getInstanceMethod((void *)phReq, sel_registerName("creationRequestForAssetFromFileAtURL:")) != 0;
-        BOOL hasPerf = class_getInstanceMethod((void *)phLib, sel_registerName("performChanges:completionHandler:")) != 0;
-        BOOL hasLib = class_getInstanceMethod((void *)phLib, sel_registerName("sharedPhotoLibrary")) != 0;
+        BOOL hasReq = class_getInstanceMethod((__bridge void *)phReq, sel_registerName("creationRequestForAssetFromFileAtURL:")) != 0;
+        BOOL hasPerf = class_getInstanceMethod((__bridge void *)phLib, sel_registerName("performChanges:completionHandler:")) != 0;
+        BOOL hasLib = class_getInstanceMethod((__bridge void *)phLib, sel_registerName("sharedPhotoLibrary")) != 0;
         { char bl[112]; snprintf(bl, sizeof(bl), "DL-CHECK req=%d perf=%d lib=%d", hasReq ? 1 : 0, hasPerf ? 1 : 0, hasLib ? 1 : 0); PwB(bl); }
         if (!hasReq || !hasPerf || !hasLib) { [self showTip:@"系统不支持此保存方式"]; return; }
         long st = ((long(*)(Class, SEL))objc_msgSend)(phLib, sel_registerName("authorizationStatus"));
