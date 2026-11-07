@@ -1521,7 +1521,7 @@ static UILabel *gRandLabel = nil;
     WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:(double)mode]);
     // 1.69: 同步方框文字(1.68 漏了这步, 选完一直显示旧字)
     if (gRandLabel) {
-        [gRandLabel setText:[NSString stringWithFormat:@"%@ ▾", LDDRandomName(mode)]];
+        [gRandLabel setText:LDDRandomName(mode)];
         gRandLabel = nil;
     }
     [self dismissRandomPicker];
@@ -1542,7 +1542,7 @@ static UILabel *gRandLabel = nil;
     double mw = wb.w;
     double mx = wb.ox;
     double my = wb.oy + wb.h + 4.0;
-    double mh = 3.0 * 38.0;
+    double mh = 5.0 * 38.0;
     // 挂到窗口层(屏幕坐标, 不随表格滚动)
     id win = [[UIApplication sharedApplication] keyWindow];
     if (!win) return;
@@ -1566,16 +1566,16 @@ static UILabel *gRandLabel = nil;
     [[menu layer] setShadowOffset:so];
     [menu setAlpha:0.0];
     [win addSubview:menu];
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < 5; k++) {
         UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 38.0, mw, 38.0)];
-        NSString *t = (k == 0 ? LDDRandomName(0) : (k == 1 ? LDDRandomName(1) : LDDRandomName(2)));
+        NSString *t = LDDRandomName(k);
         [opt setTitle:(cur == k ? ([NSString stringWithFormat:@"✓ %@", t]) : t) forState:0];
         [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
         [opt setFont:[UIFont systemFontOfSize:14.0]];
         [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
         [menu addSubview:opt];
-        if (k < 2) {
+        if (k < 4) {
             UIView *sep = [[UIView alloc] initWithFrame:MakeRect(12, (k + 1) * 38.0 - 0.5, mw - 24, 0.5)];
             [sep setBackgroundColor:[UIColor colorWithWhite:0.9 alpha:1.0]];
             [menu addSubview:sep];
@@ -1643,6 +1643,8 @@ static UILabel *gRandLabel = nil;
 static NSString *LDDRandomName(long s) {
     if (s == 1) return @"全部随机";
     if (s == 2) return @"不重复";
+    if (s == 3) return @"只随机GIF";
+    if (s == 4) return @"只随机视频";
     return @"关";
 }
 // 1.9.156: 输入框预填值去小数 (偏移=整数, 速度=去尾零保留1位)
@@ -1692,7 +1694,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.72";
+    NSString *ver = @"1.73";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1886,9 +1888,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         long st = sv ? (long)[sv doubleValue] : 0;
         [vv setText:LDDRandomName(st)];
         [box addSubview:vv];
-        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(78, 0, 24, 30)];
+        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(76, -4, 30, 30)];
         [cv setText:@"⌄"];
-        [cv setFont:[UIFont boldSystemFontOfSize:14.0]];
+        [cv setFont:[UIFont boldSystemFontOfSize:18.0]];
         [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
         [cv setTextAlignment:1];
         [box addSubview:cv];
