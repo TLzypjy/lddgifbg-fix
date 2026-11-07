@@ -1520,7 +1520,7 @@ static UILabel *gRandLabel = nil;
     }
     [self dismissRandomPicker];
 }
-// 1.68: 锚定在"素材随机"行下方的弹层(同灵动通知"点击动作"交互)
+// 1.71: 锚定弹层重做(同 TrollOpen) —— 菜单与行同宽、紧贴方框下方, 白卡片圆角+淡入
 - (void)openRandomPickerAtIndexPath:(id)ip tableView:(id)tv {
     [self dismissRandomPicker];
     UIView *root = [self view];
@@ -1530,27 +1530,41 @@ static UILabel *gRandLabel = nil;
     // 1.69: 记住值标签, 选中后刷新文字
     id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
     if (cell) gRandLabel = (UILabel *)[cell viewWithTag:2029];
-    CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
-    CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
-    double mw = 170.0, mh = 132.0;
-    double mx = vr.ox + vr.w - mw - 8.0;
-    if (mx < 8) mx = 8;
-    double my = vr.oy + vr.h - 4.0;
-    // 全屏透明遮罩(点空白关闭)
+    // 1.71: 锚定到方框(2031) —— 菜单与行同宽, 紧贴方框底缘
+    double mw = [root bounds].w - 32.0;
+    double mx = 16.0;
+    double my = 0.0;
+    UIView *box = [cell viewWithTag:2031];
+    if (box) {
+        CGRect br = [(UITableView *)tv convertRect:[box frame] fromView:[box superview]];
+        my = br.oy + br.h + 4.0;
+    } else {
+        CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
+        CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
+        my = vr.oy + vr.h + 4.0;
+    }
+    double mh = 3.0 * 46.0;
+    // 全屏半透明遮罩(点空白关闭)
     UIView *mask = [[UIView alloc] initWithFrame:[root bounds]];
     [mask setTag:996];
+    [mask setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.12]];
     UITapGestureRecognizer *dg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissRandomPicker)];
     [mask addGestureRecognizer:dg];
     [root addSubview:mask];
-    // 菜单本体
+    // 菜单本体(白卡片圆角+阴影, 与方框同宽)
     UIView *menu = [[UIView alloc] initWithFrame:MakeRect(mx, my, mw, mh)];
     [menu setTag:997];
     [menu setBackgroundColor:[UIColor whiteColor]];
-    [[menu layer] setCornerRadius:12.0];
+    [[menu layer] setCornerRadius:14.0];
     [[menu layer] setMasksToBounds:YES];
+    [[menu layer] setShadowColor:(CGColorRef)[[UIColor colorWithWhite:0.0 alpha:1.0] CGColor]];
+    [[menu layer] setShadowOpacity:0.12];
+    [[menu layer] setShadowRadius:8.0];
+    [[menu layer] setShadowOffset:MakeRect(0, 0, 2, 6)];
+    [menu setAlpha:0.0];
     [root addSubview:menu];
     for (int k = 0; k < 3; k++) {
-        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 44.0, mw, 44.0)];
+        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 46.0, mw, 46.0)];
         NSString *t = (k == 0 ? LDDRandomName(0) : (k == 1 ? LDDRandomName(1) : LDDRandomName(2)));
         [opt setTitle:(cur == k ? ([NSString stringWithFormat:@"✓ %@", t]) : t) forState:0];
         [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
@@ -1559,11 +1573,13 @@ static UILabel *gRandLabel = nil;
         objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
         [menu addSubview:opt];
         if (k < 2) {
-            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(14, (k + 1) * 44.0 - 0.5, mw - 28, 0.5)];
-            [sep setBackgroundColor:[UIColor colorWithWhite:0.88 alpha:1.0]];
+            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(16, (k + 1) * 46.0 - 0.5, mw - 32, 0.5)];
+            [sep setBackgroundColor:[UIColor colorWithWhite:0.9 alpha:1.0]];
             [menu addSubview:sep];
         }
     }
+    // 淡入
+    [UIView animateWithDuration:0.18 delay:0 usingSpringWithDamping:1.0 initialSpringVelocity:0 options:0 animations:^{ [menu setAlpha:1.0]; } completion:0];
 }
 // 1.64: 根页面弹提示 (素材库页面的 showTip 是另一个类的, 这里需要自己的)
 - (void)showTip:(NSString *)msg {
@@ -1673,7 +1689,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.70";
+    NSString *ver = @"1.71";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1707,7 +1723,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [cell setAccessoryType:0];
     if (row == 0) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 110, 22)];
-        [label setText:@"启用总开关"];
+        [label setText:@"功能启用"];
         [label setFont:[UIFont systemFontOfSize:16.0]];
         [[cell contentView] addSubview:label];
         UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 14, 51, 31)];
@@ -1844,30 +1860,39 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
     } else if (row == 5) {
-        // 1.66: 素材随机 (点击循环: 关 -> 全部随机 -> 不重复随机)
+        // 1.66: 素材随机
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 130, 22)];
         [label setText:@"素材随机"];
         [label setFont:[UIFont systemFontOfSize:16.0]];
         [[cell contentView] addSubview:label];
-        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 120, 11, 108, 28)];
-        [vv setTextAlignment:2];
-        [vv setFont:[UIFont systemFontOfSize:13.0]];
-        [vv setTextColor:[UIColor colorWithRed:0.33 green:0.33 blue:0.33 alpha:1.0]];
-        [vv setTextAlignment:1];
+        // 1.71: 方框样式(同灵动通知): 白底+灰边框+圆角, 文字左+橙色箭头右
+        UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 126, 10, 110, 30)];
+        [box setTag:2031];
+        [box setBackgroundColor:[UIColor whiteColor]];
+        [[box layer] setBorderWidth:1.0];
+        [[box layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
+        [[box layer] setCornerRadius:12.0];
+        [[box layer] setMasksToBounds:YES];
+        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(12, 0, 62, 30)];
+        [vv setFont:[UIFont systemFontOfSize:14.0]];
+        [vv setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
+        [vv setTextAlignment:0];
         [vv setTag:2029];
         NSUserDefaults *uds = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id sv = [uds objectForKey:@"lddgifbgRandom"];
         long st = sv ? (long)[sv doubleValue] : 0;
-        [vv setText:[NSString stringWithFormat:@"%@ ▾", LDDRandomName(st)]];
-        // 1.68: 方框样式(边框+圆角), 同"通知上岛样式 标准 ▾"
-        [[vv layer] setBorderWidth:1.0];
-        [[vv layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.72 alpha:1.0] CGColor]];
-        [[vv layer] setCornerRadius:10.0];
-        [[vv layer] setMasksToBounds:YES];
-        [[cell contentView] addSubview:vv];
+        [vv setText:LDDRandomName(st)];
+        [box addSubview:vv];
+        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(78, 0, 24, 30)];
+        [cv setText:@"⌄"];
+        [cv setFont:[UIFont boldSystemFontOfSize:14.0]];
+        [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
+        [cv setTextAlignment:1];
+        [box addSubview:cv];
+        [[cell contentView] addSubview:box];
         [cell setSelectionStyle:1];
     } else {
-        NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"跳转素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
+        NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:16.0]];
