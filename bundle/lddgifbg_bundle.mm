@@ -152,6 +152,10 @@ extern "C" void *CGBitmapContextCreate(void *data, unsigned long w, unsigned lon
 extern "C" void CGContextDrawImage(void *ctx, CGRect rect, CGImageRef img);
 extern "C" void CGColorSpaceRelease(void *cs);
 extern "C" void CGContextRelease(void *ctx);
+// 1.81: 画小号滑块圆钮
+extern "C" void *UIGraphicsGetCurrentContext(void);
+extern "C" void CGContextSetRGBFillColor(void *ctx, double r, double g, double b, double a);
+extern "C" void CGContextFillEllipseInRect(void *ctx, CGRect rect);
 extern "C" void *kCGImagePropertyGIFDictionary;
 extern "C" void *kCGImagePropertyGIFDelayTime;
 extern "C" void *kCGImagePropertyGIFUnclampedDelayTime;
@@ -329,6 +333,7 @@ extern "C" void UIGraphicsEndImageContext(void);
 - (void)setMaximumValue:(float)m;
 - (void)setValue:(float)v;
 - (float)value;
+- (void)setThumbImage:(id)img forState:(NSUInteger)s;
 - (void)addTarget:(id)t action:(SEL)a forControlEvents:(NSUInteger)e;
 @end
 @interface UITableViewCell : UIView
@@ -1672,6 +1677,21 @@ static NSString *LDDInputNum(double v, BOOL isSpeed) {
     if (v == (double)(long long)v) return [NSString stringWithFormat:@"%.0f", v];
     return [NSString stringWithFormat:@"%.1f", v];
 }
+// 1.81: 小号滑块圆钮 (21pt 白底细灰边) —— 系统默认圆钮 ~28pt 太大; 只换圆钮不动轨道
+static UIImage *LDDSliderThumbImg(void) {
+    static UIImage *img = nil;
+    if (img) return img;
+    CGSize tsz; tsz.w = 21.0; tsz.h = 21.0;
+    UIGraphicsBeginImageContextWithOptions(tsz, NO, 0.0);
+    void *ctx = UIGraphicsGetCurrentContext();
+    CGContextSetRGBFillColor(ctx, 0.85, 0.85, 0.87, 1.0);
+    CGContextFillEllipseInRect(ctx, MakeRect(0, 0, 21, 21));
+    CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
+    CGContextFillEllipseInRect(ctx, MakeRect(1, 1, 19, 19));
+    img = (UIImage *)UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return img;
+}
 // 1.9.146: 预览尺寸, heightForRow/cellForRow 共用
 // 1.55 自用版: 预览改为永久固定尺寸(撑满宽 x 固定高度) —— 不再跟随 __island_size__
 // 上下跳动(旧逻辑高度取决于最近一次岛的形态, 音乐条/通知横幅来回切就变大变小)
@@ -1718,7 +1738,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.80";
+    NSString *ver = @"1.81";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1763,7 +1783,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 14, 51, 31)];
+        UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 11, 51, 31)];
         [sw setAutoresizingMask:1];
         [sw setTag:1001];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1821,8 +1841,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
+        // 1.81: 滑条左移拉长, 左距标题 20 = 右距方框 20 等距(轨道内缩≈圆钮半径, 两侧对称抵消)
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(86, 12, b.w - 208, 28)];
         [sl setAutoresizingMask:2];
+        [sl setThumbImage:LDDSliderThumbImg() forState:0];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1860,8 +1882,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
+        // 1.81: 滑条左移拉长, 左距标题 20 = 右距方框 20 等距(轨道内缩≈圆钮半径, 两侧对称抵消)
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(86, 12, b.w - 208, 28)];
         [sl setAutoresizingMask:2];
+        [sl setThumbImage:LDDSliderThumbImg() forState:0];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1899,8 +1923,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
+        // 1.81: 滑条左移拉长, 左距标题 20 = 右距方框 20 等距(轨道内缩≈圆钮半径, 两侧对称抵消)
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(86, 12, b.w - 208, 28)];
         [sl setAutoresizingMask:2];
+        [sl setThumbImage:LDDSliderThumbImg() forState:0];
         [sl setMinimumValue:0.5];
         [sl setMaximumValue:3.0];   // 1.9.152: 支持到三倍速
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
