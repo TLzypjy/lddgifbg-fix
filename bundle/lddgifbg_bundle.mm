@@ -1569,7 +1569,9 @@ static UILabel *gRandLabel = nil;
     for (int k = 0; k < 5; k++) {
         UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 38.0, mw, 38.0)];
         NSString *t = LDDRandomName(k);
-        [opt setTitle:(cur == k ? ([NSString stringWithFormat:@"✓ %@", t]) : t) forState:0];
+        // 1.75: 所有选项用同宽前缀(✓ 或全宽空格), 文字不因选中而偏移
+        NSString *prefix = (cur == k ? @"✓ " : @"　 ");
+        [opt setTitle:[NSString stringWithFormat:@"%@%@", prefix, t] forState:0];
         [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
         [opt setFont:[UIFont systemFontOfSize:14.0]];
         [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -1694,7 +1696,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.74";
+    NSString *ver = @"1.75";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1874,7 +1876,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 126, 10, 110, 30)];
         [box setTag:2031];
         [box setBackgroundColor:[UIColor whiteColor]];
-        [[box layer] setBorderWidth:1.0];
+        [[box layer] setBorderWidth:0.5];
         [[box layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
         [[box layer] setCornerRadius:12.0];
         [[box layer] setMasksToBounds:YES];
@@ -1888,7 +1890,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         long st = sv ? (long)[sv doubleValue] : 0;
         [vv setText:LDDRandomName(st)];
         [box addSubview:vv];
-        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(76, -4, 30, 30)];
+        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(72, -4, 38, 30)];
         [cv setText:@"⌄"];
         [cv setFont:[UIFont boldSystemFontOfSize:18.0]];
         [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
