@@ -1511,9 +1511,9 @@ static const char kLDDRandOptKey = 0;
 }
 // 1.69: 弹层打开时记住值标签, 选中后刷新文字
 static UILabel *gRandLabel = nil;
-// 1.68: 选中一个随机模式
-- (void)randomOptTapped:(UIButton *)b {
-    NSNumber *k = objc_getAssociatedObject(b, &kLDDRandOptKey);
+// 1.76: 选中一个随机模式(从 tap 手势关联对象取 mode)
+- (void)randomOptTapped:(UITapGestureRecognizer *)g {
+    NSNumber *k = objc_getAssociatedObject(g, &kLDDRandOptKey);
     long mode = k ? (long)[k doubleValue] : 0;
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithDouble:(double)mode] forKey:@"lddgifbgRandom"];
@@ -1567,16 +1567,25 @@ static UILabel *gRandLabel = nil;
     [menu setAlpha:0.0];
     [win addSubview:menu];
     for (int k = 0; k < 5; k++) {
-        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 38.0, mw, 38.0)];
-        NSString *t = LDDRandomName(k);
-        // 1.75: 所有选项用同宽前缀(✓ 或全宽空格), 文字不因选中而偏移
-        NSString *prefix = (cur == k ? @"✓ " : @"　 ");
-        [opt setTitle:[NSString stringWithFormat:@"%@%@", prefix, t] forState:0];
-        [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
-        [opt setFont:[UIFont systemFontOfSize:14.0]];
-        [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
-        objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
-        [menu addSubview:opt];
+        // 1.76: 选项行改为 UILabel(左对齐) + tap 手势, ✓ 固定左侧不推挤文字
+        UIView *optRow = [[UIView alloc] initWithFrame:MakeRect(0, k * 38.0, mw, 38.0)];
+        UITapGestureRecognizer *optTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(randomOptTapped:)];
+        objc_setAssociatedObject(optTap, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
+        [optRow addGestureRecognizer:optTap];
+        [optRow setBackgroundColor:[UIColor clearColor]];
+        [menu addSubview:optRow];
+        UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(14, 0, 22, 38)];
+        [ck setText:(cur == k ? @"✓" : @"")];
+        [ck setFont:[UIFont systemFontOfSize:13.0]];
+        [ck setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
+        [ck setTextAlignment:0];
+        [optRow addSubview:ck];
+        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(40, 0, mw - 54, 38)];
+        [tl setText:LDDRandomName(k)];
+        [tl setFont:[UIFont systemFontOfSize:14.0]];
+        [tl setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
+        [tl setTextAlignment:0];
+        [optRow addSubview:tl];
         if (k < 4) {
             UIView *sep = [[UIView alloc] initWithFrame:MakeRect(12, (k + 1) * 38.0 - 0.5, mw - 24, 0.5)];
             [sep setBackgroundColor:[UIColor colorWithWhite:0.9 alpha:1.0]];
@@ -1696,7 +1705,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.75";
+    NSString *ver = @"1.76";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1890,9 +1899,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         long st = sv ? (long)[sv doubleValue] : 0;
         [vv setText:LDDRandomName(st)];
         [box addSubview:vv];
-        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(72, -4, 38, 30)];
+        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(70, -4, 42, 30)];
         [cv setText:@"⌄"];
-        [cv setFont:[UIFont boldSystemFontOfSize:18.0]];
+        [cv setFont:[UIFont boldSystemFontOfSize:20.0]];
         [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
         [cv setTextAlignment:1];
         [box addSubview:cv];
