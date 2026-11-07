@@ -196,6 +196,7 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 - (id)subviews;
 - (id)layer;
 - (void)setContentMode:(NSInteger)m;
+- (void)setTintColor:(id)c;
 - (void)setClipsToBounds:(BOOL)b;
 - (void)setAlpha:(double)a;
 - (id)window;
@@ -273,6 +274,9 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 @end
 @interface UIImage : NSObject
 + (id)imageWithContentsOfFile:(NSString *)p;
+// 1.78: SF Symbol 箭头 (同灵动通知)
++ (id)systemImageNamed:(NSString *)n;
++ (id)systemImageNamed:(NSString *)n withConfiguration:(id)c;
 + (id)imageWithCGImage:(CGImageRef)cg scale:(double)s orientation:(NSInteger)o;
 - (CGSize)size;
 - (void)drawInRect:(CGRect)r;
@@ -283,6 +287,10 @@ static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, 
 extern "C" void UIGraphicsBeginImageContextWithOptions(CGSize sz, BOOL opaque, double scale);
 extern "C" id UIGraphicsGetImageFromCurrentImageContext(void);
 extern "C" void UIGraphicsEndImageContext(void);
+// 1.78
+@interface UIImageSymbolConfiguration : NSObject
++ (id)configurationWithPointSize:(double)p weight:(double)w;
+@end
 @interface UIImageView : UIView
 - (id)initWithFrame:(CGRect)r;
 - (void)setImage:(id)img;
@@ -1631,13 +1639,9 @@ static UILabel *gRandLabel = nil;
     if (tb) [tb reloadData];
 }
 // 1.9.140: 从素材选择器返回时刷新预览行 (跟随新素材)
-// 1.76: 刷新移到 viewDidAppear —— 原来 viewWillAppear 在转场开始前就 reloadData,
-// 表格尚未按最终宽度布局, 个别时候按旧宽建行, 进场后重新排版, 整页向两边拉伸一下再回弹
+// 1.78: 建行宽度已改为表格实际宽, 不再依赖布局时序, 刷新放回 viewWillAppear(转场前, 不可见)
 - (void)viewWillAppear:(BOOL)animated {
     @try { [super viewWillAppear:animated]; } @catch (id e) { LogB("ROOT-WVA-EXC"); }
-}
-- (void)viewDidAppear:(BOOL)animated {
-    @try { [super viewDidAppear:animated]; } @catch (id e) {}
     id tb = [self table];
     if (tb) { [tb reloadData]; LogB("PREVIEW-RELOAD-OK"); }
     else LogB("PREVIEW-RELOAD-NO-TABLE");
@@ -1714,7 +1718,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.77";
+    NSString *ver = @"1.78";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1742,7 +1746,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     UITableView *table = (UITableView *)tv;
     UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:1 reuseIdentifier:@"c"];
-    CGRect b = [[cell contentView] bounds];
+    // 1.78 伸缩根因: 新建 cell 的 contentView 首次布局前宽度不对(0/默认宽), 按它建行,
+    // 进场后系统按真实宽重排 -> 整页向右拉伸一下(时序不同表现为偶发/必现)。
+    // 改为按表格实际宽建行, 表格未定宽时兜底屏幕宽; 所有子视图再加 autoresizing 双保险。
+    double cbw = [tv bounds].w;
+    if (cbw < 100) cbw = [[UIScreen mainScreen] bounds].w;
+    CGRect b = MakeRect(0, 0, cbw, 52);
     for (UIView *v in [[cell contentView] subviews]) { if (v) [v removeFromSuperview]; }
     [cell setSelectionStyle:0];
     [cell setAccessoryType:0];
@@ -1750,8 +1759,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 110, 22)];
         [label setText:@"功能启用"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 14, 51, 31)];
+        [sw setAutoresizingMask:1];
         [sw setTag:1001];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id v = [ud objectForKey:@"Enablelddgifbg"];
@@ -1770,6 +1781,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UIView *box = [[UIView alloc] initWithFrame:cb];
         [box setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
         [box setTag:2010];
+        [box setAutoresizingMask:2];
         id blay = [box layer];
         [blay setCornerRadius:ih / 2.0];
         [blay setMasksToBounds:YES];
@@ -1787,6 +1799,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [piv setContentMode:2];
             [piv setImage:pimg];
             [piv setTag:2011];
+            [piv setAutoresizingMask:2];
             [box addSubview:piv];
             gPrevContent = piv;
         } else {
@@ -1804,8 +1817,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"水平偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        [sl setAutoresizingMask:2];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1820,6 +1835,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
+        [vl setAutoresizingMask:1];
         [vl setTag:2023];
         [vl setText:[NSString stringWithFormat:@"%.0f", dv]];
         // 1.9.153: 点击数值可自定义输入
@@ -1832,8 +1848,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"垂直偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        [sl setAutoresizingMask:2];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1848,6 +1866,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
+        [vl setAutoresizingMask:1];
         [vl setTag:2024];
         [vl setText:[NSString stringWithFormat:@"%.0f", dv]];
         // 1.9.153: 点击数值可自定义输入
@@ -1860,8 +1879,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"播放速度"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        [sl setAutoresizingMask:2];
         [sl setMinimumValue:0.5];
         [sl setMaximumValue:3.0];   // 1.9.152: 支持到三倍速
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1877,6 +1898,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
+        [vl setAutoresizingMask:1];
         [vl setTag:2025];
         [vl setText:[NSString stringWithFormat:@"%.1fx", dv]];
         // 1.9.153: 点击数值可自定义输入
@@ -1889,6 +1911,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 130, 22)];
         [label setText:@"显示模式"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         // 1.71: 方框样式(同灵动通知): 白底+灰边框+圆角, 文字左+橙色箭头右
         UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 126, 10, 110, 30)];
@@ -1908,12 +1931,23 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         long st = sv ? (long)[sv doubleValue] : 0;
         [vv setText:LDDRandomName(st)];
         [box addSubview:vv];
-        UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(70, -4, 42, 30)];
-        [cv setText:@"⌄"];
-        [cv setFont:[UIFont boldSystemFontOfSize:20.0]];
-        [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
-        [cv setTextAlignment:1];
-        [box addSubview:cv];
+        // 1.78: 箭头改 SF Symbol chevron.down (同灵动通知), 比原文字箭头大一圈
+        UIImage *chImg = [UIImage systemImageNamed:@"chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:0.6]];
+        if (chImg) {
+            UIImageView *cv = [[UIImageView alloc] initWithFrame:MakeRect(82, 7, 22, 16)];
+            [cv setImage:chImg];
+            [cv setTintColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
+            [cv setContentMode:1];
+            [box addSubview:cv];
+        } else {
+            UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(70, -4, 42, 30)];
+            [cv setText:@"⌄"];
+            [cv setFont:[UIFont boldSystemFontOfSize:20.0]];
+            [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
+            [cv setTextAlignment:1];
+            [box addSubview:cv];
+        }
+        [box setAutoresizingMask:1];
         [[cell contentView] addSubview:box];
         [cell setSelectionStyle:1];
     } else {
@@ -1921,6 +1955,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:15.0]];
+        [label setAutoresizingMask:4];
         if (row == 9) [label setTextColor:[UIColor redColor]];
         [[cell contentView] addSubview:label];
         [cell setSelectionStyle:1];
