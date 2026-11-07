@@ -1494,14 +1494,20 @@ static void LDDNotifyMatChanged(void) {
 static const char kLDDRandOptKey = 0;
 
 @implementation lddgifbgRootListController
-// 1.68: 关闭随机弹层(点空白处)
+// 1.72: 关闭随机弹层(弹层挂在窗口层, 从 keyWindow 找)
 - (void)dismissRandomPicker {
-    UIView *root = [self view];
-    UIView *menu = [root viewWithTag:997];
+    id win = [[UIApplication sharedApplication] keyWindow];
+    if (!win) return;
+    UIView *menu = [win viewWithTag:997];
     if (menu) [menu removeFromSuperview];
-    UIView *mask = [root viewWithTag:996];
+    UIView *mask = [win viewWithTag:996];
     if (mask) [mask removeFromSuperview];
     gRandLabel = nil;
+}
+// 1.72: 离开页面时清理窗口层弹层
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self dismissRandomPicker];
 }
 // 1.69: 弹层打开时记住值标签, 选中后刷新文字
 static UILabel *gRandLabel = nil;
@@ -1520,67 +1526,63 @@ static UILabel *gRandLabel = nil;
     }
     [self dismissRandomPicker];
 }
-// 1.71: 锚定弹层重做(同 TrollOpen) —— 菜单与行同宽、紧贴方框下方, 白卡片圆角+淡入
+// 1.72: 锚定弹层挂窗口层 —— 屏幕坐标定位, 永远紧贴方框下方, 不随表格滚动错位
+// 菜单紧凑(行高 38), 选项文字居中带 ✓, 白卡片圆角+阴影, 淡入
 - (void)openRandomPickerAtIndexPath:(id)ip tableView:(id)tv {
     [self dismissRandomPicker];
-    UIView *root = [self view];
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     id v = [ud objectForKey:@"lddgifbgRandom"];
     long cur = v ? (long)[v doubleValue] : 0;
-    // 1.69: 记住值标签, 选中后刷新文字
     id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
     if (cell) gRandLabel = (UILabel *)[cell viewWithTag:2029];
-    // 1.71: 锚定到方框(2031) —— 菜单与行同宽, 紧贴方框底缘
-    double mw = [root bounds].w - 32.0;
-    double mx = 16.0;
-    double my = 0.0;
     UIView *box = [cell viewWithTag:2031];
-    if (box) {
-        CGRect br = [(UITableView *)tv convertRect:[box frame] fromView:[box superview]];
-        my = br.oy + br.h + 4.0;
-    } else {
-        CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
-        CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
-        my = vr.oy + vr.h + 4.0;
-    }
-    double mh = 3.0 * 46.0;
+    if (!box) return;
+    // 方框在窗口(屏幕)坐标里的位置
+    CGRect wb = [box convertRect:[box bounds] toView:nil];
+    double mw = wb.w;
+    double mx = wb.ox;
+    double my = wb.oy + wb.h + 4.0;
+    double mh = 3.0 * 38.0;
+    // 挂到窗口层(屏幕坐标, 不随表格滚动)
+    id win = [[UIApplication sharedApplication] keyWindow];
+    if (!win) return;
     // 全屏半透明遮罩(点空白关闭)
-    UIView *mask = [[UIView alloc] initWithFrame:[root bounds]];
+    UIView *mask = [[UIView alloc] initWithFrame:[win bounds]];
     [mask setTag:996];
     [mask setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.12]];
     UITapGestureRecognizer *dg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissRandomPicker)];
     [mask addGestureRecognizer:dg];
-    [root addSubview:mask];
-    // 菜单本体(白卡片圆角+阴影, 与方框同宽)
+    [win addSubview:mask];
+    // 菜单本体: 白卡片圆角+阴影, 与方框同宽同位
     UIView *menu = [[UIView alloc] initWithFrame:MakeRect(mx, my, mw, mh)];
     [menu setTag:997];
     [menu setBackgroundColor:[UIColor whiteColor]];
     [[menu layer] setCornerRadius:14.0];
     [[menu layer] setMasksToBounds:YES];
     [[menu layer] setShadowColor:(CGColorRef)[[UIColor colorWithWhite:0.0 alpha:1.0] CGColor]];
-    [[menu layer] setShadowOpacity:0.12];
-    [[menu layer] setShadowRadius:8.0];
-    CGSize so; so.w = 2.0; so.h = 6.0;
+    [[menu layer] setShadowOpacity:0.15];
+    [[menu layer] setShadowRadius:10.0];
+    CGSize so; so.w = 0.0; so.h = 5.0;
     [[menu layer] setShadowOffset:so];
     [menu setAlpha:0.0];
-    [root addSubview:menu];
+    [win addSubview:menu];
     for (int k = 0; k < 3; k++) {
-        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 46.0, mw, 46.0)];
+        UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 38.0, mw, 38.0)];
         NSString *t = (k == 0 ? LDDRandomName(0) : (k == 1 ? LDDRandomName(1) : LDDRandomName(2)));
         [opt setTitle:(cur == k ? ([NSString stringWithFormat:@"✓ %@", t]) : t) forState:0];
         [opt setTitleColor:[UIColor colorWithWhite:0.15 alpha:1.0] forState:0];
-        [opt setFont:[UIFont systemFontOfSize:15.0]];
+        [opt setFont:[UIFont systemFontOfSize:14.0]];
         [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
         [menu addSubview:opt];
         if (k < 2) {
-            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(16, (k + 1) * 46.0 - 0.5, mw - 32, 0.5)];
+            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(12, (k + 1) * 38.0 - 0.5, mw - 24, 0.5)];
             [sep setBackgroundColor:[UIColor colorWithWhite:0.9 alpha:1.0]];
             [menu addSubview:sep];
         }
     }
     // 淡入
-    [UIView animateWithDuration:0.18 delay:0 usingSpringWithDamping:1.0 initialSpringVelocity:0 options:0 animations:^{ [menu setAlpha:1.0]; } completion:0];
+    [UIView animateWithDuration:0.15 delay:0 usingSpringWithDamping:1.0 initialSpringVelocity:0 options:0 animations:^{ [menu setAlpha:1.0]; } completion:0];
 }
 // 1.64: 根页面弹提示 (素材库页面的 showTip 是另一个类的, 这里需要自己的)
 - (void)showTip:(NSString *)msg {
@@ -1690,7 +1692,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.71";
+    NSString *ver = @"1.72";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
