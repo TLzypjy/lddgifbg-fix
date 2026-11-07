@@ -1582,20 +1582,20 @@ static UILabel *gRandLabel = nil;
         [optRow addGestureRecognizer:optTap];
         [optRow setBackgroundColor:[UIColor clearColor]];
         [menu addSubview:optRow];
-        UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(14, 0, 22, 38)];
+        UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(8, 0, 16, 38)];
         [ck setText:(cur == k ? @"✓" : @"")];
         [ck setFont:[UIFont systemFontOfSize:13.0]];
         [ck setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [ck setTextAlignment:0];
         [optRow addSubview:ck];
-        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(40, 0, mw - 54, 38)];
+        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(28, 0, mw - 36, 38)];
         [tl setText:LDDRandomName(k)];
         [tl setFont:[UIFont systemFontOfSize:14.0]];
         [tl setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [tl setTextAlignment:0];
         [optRow addSubview:tl];
         if (k < 4) {
-            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(12, (k + 1) * 38.0 - 0.5, mw - 24, 0.5)];
+            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(10, (k + 1) * 38.0 - 0.5, mw - 20, 0.5)];
             [sep setBackgroundColor:[UIColor colorWithWhite:0.9 alpha:1.0]];
             [menu addSubview:sep];
         }
@@ -1718,7 +1718,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.79";
+    NSString *ver = @"1.80";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1821,7 +1821,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
         [sl setAutoresizingMask:2];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
@@ -1833,18 +1833,26 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LogB("CELL-POSX-SLIDER");
         [sl addTarget:self action:@selector(posXChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
-        // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setAutoresizingMask:1];
+        // 1.80: 数值改同款方框(白底灰边圆角, 数字居中无箭头), 与显示模式方框同宽同位对齐; 点击仍可输入
+        UIView *vb = [[UIView alloc] initWithFrame:MakeRect(b.w - 112, 11, 96, 30)];
+        [vb setBackgroundColor:[UIColor whiteColor]];
+        [[vb layer] setBorderWidth:0.5];
+        [[vb layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
+        [[vb layer] setCornerRadius:12.0];
+        [[vb layer] setMasksToBounds:YES];
+        [vb setAutoresizingMask:1];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 96, 30)];
+        [vl setTextAlignment:1];
+        [vl setFont:[UIFont systemFontOfSize:14.0]];
+        [vl setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [vl setTag:2023];
         [vl setText:[NSString stringWithFormat:@"%.0f", dv]];
         // 1.9.153: 点击数值可自定义输入
         [vl setUserInteractionEnabled:YES];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
+        [vb addSubview:vl];
+        [[cell contentView] addSubview:vb];
     } else if (row == 3) {
         // 1.9.140: 垂直偏移 (上下调整显示区域, -200~200, 默认0)
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
@@ -1852,7 +1860,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
         [sl setAutoresizingMask:2];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
@@ -1864,18 +1872,26 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LogB("CELL-POSY-SLIDER");
         [sl addTarget:self action:@selector(posYChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
-        // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setAutoresizingMask:1];
+        // 1.80: 数值方框 (同水平偏移行)
+        UIView *vb = [[UIView alloc] initWithFrame:MakeRect(b.w - 112, 11, 96, 30)];
+        [vb setBackgroundColor:[UIColor whiteColor]];
+        [[vb layer] setBorderWidth:0.5];
+        [[vb layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
+        [[vb layer] setCornerRadius:12.0];
+        [[vb layer] setMasksToBounds:YES];
+        [vb setAutoresizingMask:1];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 96, 30)];
+        [vl setTextAlignment:1];
+        [vl setFont:[UIFont systemFontOfSize:14.0]];
+        [vl setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [vl setTag:2024];
         [vl setText:[NSString stringWithFormat:@"%.0f", dv]];
         // 1.9.153: 点击数值可自定义输入
         [vl setUserInteractionEnabled:YES];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
+        [vb addSubview:vl];
+        [[cell contentView] addSubview:vb];
     } else if (row == 4) {
         // 1.9.133: 播放速度滑块 (0.5x~2.0x)
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
@@ -1883,7 +1899,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 232, 28)];
         [sl setAutoresizingMask:2];
         [sl setMinimumValue:0.5];
         [sl setMaximumValue:3.0];   // 1.9.152: 支持到三倍速
@@ -1896,18 +1912,26 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LogB("CELL-SPEED-SLIDER");
         [sl addTarget:self action:@selector(speedChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
-        // 1.9.152: 滑块右侧实时数值 (倍速)
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
-        [vl setTextAlignment:2];
-        [vl setFont:[UIFont systemFontOfSize:15.0]];
-        [vl setAutoresizingMask:1];
+        // 1.80: 数值方框 (同上; 1.80 速度不再带 x)
+        UIView *vb = [[UIView alloc] initWithFrame:MakeRect(b.w - 112, 11, 96, 30)];
+        [vb setBackgroundColor:[UIColor whiteColor]];
+        [[vb layer] setBorderWidth:0.5];
+        [[vb layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
+        [[vb layer] setCornerRadius:12.0];
+        [[vb layer] setMasksToBounds:YES];
+        [vb setAutoresizingMask:1];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 96, 30)];
+        [vl setTextAlignment:1];
+        [vl setFont:[UIFont systemFontOfSize:14.0]];
+        [vl setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [vl setTag:2025];
-        [vl setText:[NSString stringWithFormat:@"%.1fx", dv]];
+        [vl setText:[NSString stringWithFormat:@"%.1f", dv]];
         // 1.9.153: 点击数值可自定义输入
         [vl setUserInteractionEnabled:YES];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(valTapped:)];
         [vl addGestureRecognizer:tap];
-        [[cell contentView] addSubview:vl];
+        [vb addSubview:vl];
+        [[cell contentView] addSubview:vb];
     } else if (row == 5) {
         // 1.74: 显示模式
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 130, 22)];
@@ -1916,14 +1940,15 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [label setAutoresizingMask:4];
         [[cell contentView] addSubview:label];
         // 1.71: 方框样式(同灵动通知): 白底+灰边框+圆角, 文字左+橙色箭头右
-        UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 126, 10, 110, 30)];
+        // 1.80: 收窄 110->96 并与三个数值方框同位对齐(x=b.w-112), 文字区缩到 68, 左边不再大片留白
+        UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 112, 11, 96, 30)];
         [box setTag:2031];
         [box setBackgroundColor:[UIColor whiteColor]];
         [[box layer] setBorderWidth:0.5];
         [[box layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
         [[box layer] setCornerRadius:12.0];
         [[box layer] setMasksToBounds:YES];
-        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 110, 30)];
+        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 68, 30)];
         [vv setFont:[UIFont systemFontOfSize:14.0]];
         [vv setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
         [vv setTextAlignment:1];
@@ -1936,13 +1961,13 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         // 1.78: 箭头改 SF Symbol chevron.down (同灵动通知), 比原文字箭头大一圈
         UIImage *chImg = [UIImage systemImageNamed:@"chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:0.6]];
         if (chImg) {
-            UIImageView *cv = [[UIImageView alloc] initWithFrame:MakeRect(82, 7, 22, 16)];
+            UIImageView *cv = [[UIImageView alloc] initWithFrame:MakeRect(68, 7, 22, 16)];
             [cv setImage:chImg];
             [cv setTintColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
             [cv setContentMode:1];
             [box addSubview:cv];
         } else {
-            UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(70, -4, 42, 30)];
+            UILabel *cv = [[UILabel alloc] initWithFrame:MakeRect(13, -4, 42, 30)];
             [cv setText:@"⌄"];
             [cv setFont:[UIFont boldSystemFontOfSize:20.0]];
             [cv setTextColor:[UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:1.0]];
@@ -2049,7 +2074,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     { id rv = [ud objectForKey:@"lddgifbgSpeed"]; double rd = rv ? [rv doubleValue] : -1.0; char bl[96]; snprintf(bl, sizeof(bl), "WRITE-SPEED-OK %.2f", rd); LogB(bl); }
     // 1.9.152: 更新右侧数值显示
     id cv = [sl superview];
-    if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2025]; if (vl) [vl setText:[NSString stringWithFormat:@"%.1fx", dv]]; }
+    if (cv) { UILabel *vl = (UILabel *)[cv viewWithTag:2025]; if (vl) [vl setText:[NSString stringWithFormat:@"%.1f", dv]]; }
 }
 // 1.52 自用版: 横幅停留/样式滑条已随钩子回滚一并移除
 // 1.68: 点击数值 -> 原位内联输入(同素材库改名交互), 不再弹 Alert
@@ -2070,15 +2095,16 @@ static const char kLDDValTagKey = 0;
     id curV = [ud objectForKey:key];
     double dv = curV ? [curV doubleValue] : 0.0;
     gEditTag = tag; gEditKey = key;
-    { id cv2 = [vl superview]; gEditSlider = (UISlider *)[cv2 viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))]; }
+    // 1.80: 数值标签现在嵌在方框里, superview 是方框找不到滑条, 改从根视图按唯一 tag 找
+    gEditSlider = (UISlider *)[root viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))];
     gEditLabel = (UILabel *)vl;
     CGRect rf = [root convertRect:[vl frame] fromView:[vl superview]];
     if (rf.oy < 8) rf.oy = 8;
-    // 1.69: 不扩宽不左移 —— 完全贴数值原位, 避免盖住滑条
+    // 1.69: 不扩宽不左移 —— 完全贴数值原位, 避免盖住滑条; 1.80 贴方框位, 文字居中与框一致
     UITextField *tf = [[UITextField alloc] initWithFrame:rf];
     [tf setText:(tag == 2025 ? LDDInputNum(dv, 1) : LDDInputNum(dv, 0))];
-    [tf setTextAlignment:2];
-    [tf setFont:[UIFont systemFontOfSize:15.0]];
+    [tf setTextAlignment:1];
+    [tf setFont:[UIFont systemFontOfSize:14.0]];
     [tf setBorderStyle:3];     // 圆角边框, 与素材库改名一致
     [tf setKeyboardType:0];    // 默认键盘(带完成键)
     [tf setReturnKeyType:9];
@@ -2107,7 +2133,7 @@ static const char kLDDValTagKey = 0;
         }
         if (gEditSlider) [gEditSlider setValue:nv];
         if (gEditLabel) {
-            if (gEditTag == 2025) [gEditLabel setText:[NSString stringWithFormat:@"%.1fx", nv]];
+            if (gEditTag == 2025) [gEditLabel setText:[NSString stringWithFormat:@"%.1f", nv]];
             else [gEditLabel setText:[NSString stringWithFormat:@"%.0f", nv]];
         }
         if (gEditTag == 2023 || gEditTag == 2024) LDDUpdatePreview();
