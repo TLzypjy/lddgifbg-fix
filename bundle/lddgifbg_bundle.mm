@@ -1641,11 +1641,11 @@ static UILabel *gRandLabel = nil;
 - (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 10; }
 // 1.66: 素材随机模式名 (0关 1全部随机 2不重复随机)
 static NSString *LDDRandomName(long s) {
-    if (s == 1) return @"全部随机";
-    if (s == 2) return @"不重复";
-    if (s == 3) return @"只随机GIF";
-    if (s == 4) return @"只随机视频";
-    return @"关";
+    if (s == 1) return @"顺序显示";
+    if (s == 2) return @"随机显示";
+    if (s == 3) return @"随机动图";
+    if (s == 4) return @"随机视频";
+    return @"固定显示";
 }
 // 1.9.156: 输入框预填值去小数 (偏移=整数, 速度=去尾零保留1位)
 static NSString *LDDInputNum(double v, BOOL isSpeed) {
@@ -1694,7 +1694,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.73";
+    NSString *ver = @"1.74";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1729,7 +1729,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     if (row == 0) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 110, 22)];
         [label setText:@"功能启用"];
-        [label setFont:[UIFont systemFontOfSize:16.0]];
+        [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
         UISwitch *sw = [[UISwitch alloc] initWithFrame:MakeRect(b.w - 67, 14, 51, 31)];
         [sw setTag:1001];
@@ -1865,10 +1865,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [vl addGestureRecognizer:tap];
         [[cell contentView] addSubview:vl];
     } else if (row == 5) {
-        // 1.66: 素材随机
+        // 1.74: 显示模式
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 130, 22)];
-        [label setText:@"素材随机"];
-        [label setFont:[UIFont systemFontOfSize:16.0]];
+        [label setText:@"显示模式"];
+        [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
         // 1.71: 方框样式(同灵动通知): 白底+灰边框+圆角, 文字左+橙色箭头右
         UIView *box = [[UIView alloc] initWithFrame:MakeRect(b.w - 126, 10, 110, 30)];
@@ -1878,10 +1878,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[box layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.78 alpha:1.0] CGColor]];
         [[box layer] setCornerRadius:12.0];
         [[box layer] setMasksToBounds:YES];
-        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(12, 0, 62, 30)];
+        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 110, 30)];
         [vv setFont:[UIFont systemFontOfSize:14.0]];
         [vv setTextColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
-        [vv setTextAlignment:0];
+        [vv setTextAlignment:1];
         [vv setTag:2029];
         NSUserDefaults *uds = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id sv = [uds objectForKey:@"lddgifbgRandom"];
@@ -1900,7 +1900,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 60, 22)];
         [label setText:t];
-        [label setFont:[UIFont systemFontOfSize:16.0]];
+        [label setFont:[UIFont systemFontOfSize:15.0]];
         if (row == 9) [label setTextColor:[UIColor redColor]];
         [[cell contentView] addSubview:label];
         [cell setSelectionStyle:1];
