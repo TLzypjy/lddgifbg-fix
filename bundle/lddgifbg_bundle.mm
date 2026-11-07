@@ -1501,7 +1501,10 @@ static const char kLDDRandOptKey = 0;
     if (menu) [menu removeFromSuperview];
     UIView *mask = [root viewWithTag:996];
     if (mask) [mask removeFromSuperview];
+    gRandLabel = nil;
 }
+// 1.69: 弹层打开时记住值标签, 选中后刷新文字
+static UILabel *gRandLabel = nil;
 // 1.68: 选中一个随机模式
 - (void)randomOptTapped:(UIButton *)b {
     NSNumber *k = objc_getAssociatedObject(b, &kLDDRandOptKey);
@@ -1510,6 +1513,11 @@ static const char kLDDRandOptKey = 0;
     [ud setObject:[NSNumber numberWithDouble:(double)mode] forKey:@"lddgifbgRandom"];
     [ud synchronize];
     WritePrefsFile(@"lddgifbgRandom", [NSNumber numberWithDouble:(double)mode]);
+    // 1.69: 同步方框文字(1.68 漏了这步, 选完一直显示旧字)
+    if (gRandLabel) {
+        [gRandLabel setText:[NSString stringWithFormat:@"%@ ▾", LDDRandomName(mode)]];
+        gRandLabel = nil;
+    }
     [self dismissRandomPicker];
 }
 // 1.68: 锚定在"素材随机"行下方的弹层(同灵动通知"点击动作"交互)
@@ -1519,6 +1527,9 @@ static const char kLDDRandOptKey = 0;
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     id v = [ud objectForKey:@"lddgifbgRandom"];
     long cur = v ? (long)[v doubleValue] : 0;
+    // 1.69: 记住值标签, 选中后刷新文字
+    id cell = [(UITableView *)tv cellForRowAtIndexPath:ip];
+    if (cell) gRandLabel = (UILabel *)[cell viewWithTag:2029];
     CGRect cr = [(UITableView *)tv rectForRowAtIndexPath:ip];
     CGRect vr = [(UITableView *)tv convertRect:cr toView:root];
     double mw = 170.0, mh = 132.0;
@@ -1659,7 +1670,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.68";
+    NSString *ver = @"1.69";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1966,7 +1977,7 @@ static const char kLDDValTagKey = 0;
     double dv = curV ? [curV doubleValue] : 0.0;
     CGRect rf = [root convertRect:[vl frame] fromView:[vl superview]];
     if (rf.oy < 8) rf.oy = 8;
-    if (rf.w < 70) { rf.ox -= 20; rf.w = 90; }
+    // 1.69: 不扩宽不左移 —— 完全贴数值原位, 避免盖住滑条
     UITextField *tf = [[UITextField alloc] initWithFrame:rf];
     [tf setText:(tag == 2025 ? LDDInputNum(dv, 1) : LDDInputNum(dv, 0))];
     [tf setTextAlignment:2];
