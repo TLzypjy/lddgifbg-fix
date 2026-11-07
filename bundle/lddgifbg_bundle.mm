@@ -1560,7 +1560,8 @@ static UILabel *gRandLabel = nil;
     [[menu layer] setShadowColor:(CGColorRef)[[UIColor colorWithWhite:0.0 alpha:1.0] CGColor]];
     [[menu layer] setShadowOpacity:0.12];
     [[menu layer] setShadowRadius:8.0];
-    [[menu layer] setShadowOffset:MakeRect(0, 0, 2, 6)];
+    CGSize so; so.w = 2.0; so.h = 6.0;
+    [[menu layer] setShadowOffset:so];
     [menu setAlpha:0.0];
     [root addSubview:menu];
     for (int k = 0; k < 3; k++) {
