@@ -1718,7 +1718,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.78";
+    NSString *ver = @"1.79";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1746,10 +1746,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     UITableView *table = (UITableView *)tv;
     UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:1 reuseIdentifier:@"c"];
-    // 1.78 伸缩根因: 新建 cell 的 contentView 首次布局前宽度不对(0/默认宽), 按它建行,
-    // 进场后系统按真实宽重排 -> 整页向右拉伸一下(时序不同表现为偶发/必现)。
-    // 改为按表格实际宽建行, 表格未定宽时兜底屏幕宽; 所有子视图再加 autoresizing 双保险。
-    double cbw = [tv bounds].w;
+    // 1.79 建行宽度: 优先用 cell 自身真实宽(复用池里的 cell 已按最终宽度布局过, 和 1.76/1.77 一致);
+    // 新 cell 宽度无效时依次兜底表格宽/屏幕宽。1.78 直接取表格宽踩坑: 转场中表格处于过渡尺寸(比
+    // 实际宽), 按它建行后 cell 不再变宽, 内容整体溢出屏幕右侧。
+    // 伸缩的根治靠 autoresizing: cell 首次定宽/变宽时所有子视图自动跟随, 不再依赖刷新时机。
+    double cbw = [[cell contentView] bounds].w;
+    if (cbw < 100) cbw = [tv bounds].w;
     if (cbw < 100) cbw = [[UIScreen mainScreen] bounds].w;
     CGRect b = MakeRect(0, 0, cbw, 52);
     for (UIView *v in [[cell contentView] subviews]) { if (v) [v removeFromSuperview]; }
