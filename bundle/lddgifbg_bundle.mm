@@ -1631,9 +1631,13 @@ static UILabel *gRandLabel = nil;
     if (tb) [tb reloadData];
 }
 // 1.9.140: 从素材选择器返回时刷新预览行 (跟随新素材)
+// 1.76: 刷新移到 viewDidAppear —— 原来 viewWillAppear 在转场开始前就 reloadData,
+// 表格尚未按最终宽度布局, 个别时候按旧宽建行, 进场后重新排版, 整页向两边拉伸一下再回弹
 - (void)viewWillAppear:(BOOL)animated {
     @try { [super viewWillAppear:animated]; } @catch (id e) { LogB("ROOT-WVA-EXC"); }
-    // 1.9.141: 素材选择返回后刷新预览行 (探针验证 table 是否取到)
+}
+- (void)viewDidAppear:(BOOL)animated {
+    @try { [super viewDidAppear:animated]; } @catch (id e) {}
     id tb = [self table];
     if (tb) { [tb reloadData]; LogB("PREVIEW-RELOAD-OK"); }
     else LogB("PREVIEW-RELOAD-NO-TABLE");
@@ -1683,7 +1687,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     }
     return 52.0;
 }
-- (double)tableView:(id)tv estimatedHeightForRowAtIndexPath:(id)ip { return 52.0; }
+// 1.76: 预估值与实际高度完全一致 (预览行98/其余52), 消除进场时内容尺寸二次修正造成的整页抖动
+- (double)tableView:(id)tv estimatedHeightForRowAtIndexPath:(id)ip {
+    return [self tableView:tv heightForRowAtIndexPath:ip];
+}
+- (double)tableView:(id)tv estimatedHeightForHeaderInSection:(NSInteger)s { return 0.0; }
+- (double)tableView:(id)tv estimatedHeightForFooterInSection:(NSInteger)s { return 96.0; }
 - (double)tableView:(id)tv heightForHeaderInSection:(NSInteger)s { return 0.0; }
 - (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return 96.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
@@ -1705,7 +1714,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.76";
+    NSString *ver = @"1.77";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
