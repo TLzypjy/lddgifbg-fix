@@ -436,12 +436,13 @@ static void ProbeWrite(const char *line) {
 static int cRandom = 0;
 static double gLastRollTs = 0;
 static NSString *gRollPath = nil;
-static NSString *GetRandomImagePath(int noRepeat) {
+static NSString *GetRandomImagePath(int mode) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *root = @"/var/mobile/lddgifbg";
     NSArray *all = [fm contentsOfDirectoryAtPath:root error:nil];
     NSMutableArray *dirs = [NSMutableArray array];
     NSString *cur = LoadPrefsValue(gPrefsKeyFolder);
+    int noRepeat = (mode == 2) ? 1 : 0;
     for (NSString *nm in all) {
         if (((BOOL(*)(id, SEL, id))objc_msgSend)(nm, sel_registerName("hasPrefix:"), @"__")) continue;
         NSString *fp = [root stringByAppendingPathComponent:nm];
@@ -452,8 +453,13 @@ static NSString *GetRandomImagePath(int noRepeat) {
         BOOL hasMedia = NO;
         for (NSString *f in fs) {
             NSString *ext = [[f pathExtension] lowercaseString];
-            if ([ext isEqualToString:@"gif"] || [ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"] ||
-                [ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) { hasMedia = YES; break; }
+            // 1.72: mode 3=只随机GIF 4=只随机视频 —— 目录筛选只收对应类型
+            if (mode == 3) { if ([ext isEqualToString:@"gif"]) { hasMedia = YES; break; } }
+            else if (mode == 4) { if ([ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"]) { hasMedia = YES; break; } }
+            else {
+                if ([ext isEqualToString:@"gif"] || [ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"] ||
+                    [ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) { hasMedia = YES; break; }
+            }
         }
         if (hasMedia) [dirs addObject:nm];
     }
@@ -473,7 +479,11 @@ static NSString *GetRandomImagePath(int noRepeat) {
         else if (!vid && ([ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"])) vid = [folder stringByAppendingPathComponent:f];
         else if (!img && ([ext isEqualToString:@"png"] || [ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])) img = [folder stringByAppendingPathComponent:f];
     }
-    NSString *out = gif ? gif : (vid ? vid : img);
+    // 1.72: 按 mode 返回对应类型
+    NSString *out = nil;
+    if (mode == 3) out = gif;
+    else if (mode == 4) out = vid;
+    else out = gif ? gif : (vid ? vid : img);
     if (out) {
         const char *oc = ((const char *(*)(id, SEL))objc_msgSend)(out, sel_registerName("UTF8String"));
         char ml[224]; snprintf(ml, sizeof(ml), "MAT-ROLL-PICK %.200s", oc ? oc : "?"); ProbeWrite(ml);
@@ -839,7 +849,7 @@ static void RefreshPrefsCache(void) {
     cPosY = GetLddGifBgPos(gPrefsKeyPosY, 0.0);
     cSpeed = GetLddGifBgSpeed();
     // 1.66: 素材随机模式 (0=关 1=全部随机 2=不重复随机)
-    { id v = LoadPrefsValue(@"lddgifbgRandom"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 2) d = 0.0; cRandom = (int)d; }
+    { id v = LoadPrefsValue(@"lddgifbgRandom"); double d = v ? [v doubleValue] : 0.0; if (!(d >= 0) || d > 4) d = 0.0; cRandom = (int)d; }
     // 1.9.172: 素材目录扫描移出 0.5s 节流(原实现每 0.5s 扫目录=CPU元凶), 改为 SHOW-1 路径按 2s 缓存调用
     // 1.9.133: 速度变化即时生效 —— GIF 重启定时器, 视频更新 rate
     if (gLastAppliedSpeed != cSpeed) {
@@ -1142,7 +1152,7 @@ static void LDDIslandLayout(id self) {
             double nowR = CFAbsoluteTimeGetCurrent();
             if (bb.h >= 50.0 && (nowR - gLastRollTs) > 3.0) {
                 gLastRollTs = nowR;
-                NSString *rp = GetRandomImagePath(cRandom == 2);
+                NSString *rp = GetRandomImagePath(cRandom);
                 if (rp) { gRollPath = rp; ProbeWrite("MAT-ROLL"); }
             }
             if (gRollPath && [[NSFileManager defaultManager] fileExistsAtPath:gRollPath]) {
@@ -1790,7 +1800,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.72");
+    ProbeWrite("LDD-BUILD v1.73");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
