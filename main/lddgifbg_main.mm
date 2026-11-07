@@ -432,10 +432,11 @@ static void ProbeWrite(const char *line) {
 }
 
 // ---------- 素材选择: gif > 视频 > 静态图 ----------
-// 1.66: 素材随机 —— cRandom 1=全部随机 2=不重复随机(不与当前选中相同); 0=关
+// 1.74: 显示模式 —— 0=固定显示 1=顺序显示 2=随机显示 3=随机动图 4=随机视频
 static int cRandom = 0;
 static double gLastRollTs = 0;
 static NSString *gRollPath = nil;
+static NSInteger gSeqIdx = 0;
 static NSString *GetRandomImagePath(int mode) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *root = @"/var/mobile/lddgifbg";
@@ -448,12 +449,11 @@ static NSString *GetRandomImagePath(int mode) {
         NSString *fp = [root stringByAppendingPathComponent:nm];
         BOOL isD = NO;
         if (![fm fileExistsAtPath:fp isDirectory:&isD] || !isD) continue;
-        if (noRepeat && cur && [nm isEqualToString:cur]) continue; // 不重复模式跳过当前选中
+        if (noRepeat && cur && [nm isEqualToString:cur]) continue;
         NSArray *fs = [fm contentsOfDirectoryAtPath:fp error:nil];
         BOOL hasMedia = NO;
         for (NSString *f in fs) {
             NSString *ext = [[f pathExtension] lowercaseString];
-            // 1.72: mode 3=只随机GIF 4=只随机视频 —— 目录筛选只收对应类型
             if (mode == 3) { if ([ext isEqualToString:@"gif"]) { hasMedia = YES; break; } }
             else if (mode == 4) { if ([ext isEqualToString:@"mp4"] || [ext isEqualToString:@"mov"]) { hasMedia = YES; break; } }
             else {
@@ -466,9 +466,14 @@ static NSString *GetRandomImagePath(int mode) {
     NSInteger n = (NSInteger)[dirs count];
     if (n == 0) return nil;
     NSString *pick = nil;
-    for (int attempt = 0; attempt < 8; attempt++) {
-        pick = [dirs objectAtIndex:(NSUInteger)arc4random_uniform((u_int32_t)n)];
-        if (!(noRepeat && cur && [pick isEqualToString:cur])) break; // 双保险
+    if (mode == 1) {
+        pick = [dirs objectAtIndex:(NSUInteger)(gSeqIdx % (NSUInteger)n)];
+        gSeqIdx++;
+    } else {
+        for (int attempt = 0; attempt < 8; attempt++) {
+            pick = [dirs objectAtIndex:(NSUInteger)arc4random_uniform((u_int32_t)n)];
+            if (!(noRepeat && cur && [pick isEqualToString:cur])) break;
+        }
     }
     NSString *folder = [root stringByAppendingPathComponent:pick];
     NSArray *fs = [fm contentsOfDirectoryAtPath:folder error:nil];
@@ -1800,7 +1805,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.73");
+    ProbeWrite("LDD-BUILD v1.74");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
