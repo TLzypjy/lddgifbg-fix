@@ -1545,11 +1545,9 @@ static UILabel *gRandLabel = nil;
     // 菜单本体
     UIView *menu = [[UIView alloc] initWithFrame:MakeRect(mx, my, mw, mh)];
     [menu setTag:997];
-    [menu setBackgroundColor:[UIColor colorWithWhite:0.98 alpha:1.0]];
+    [menu setBackgroundColor:[UIColor whiteColor]];
     [[menu layer] setCornerRadius:12.0];
     [[menu layer] setMasksToBounds:YES];
-    [[menu layer] setBorderWidth:1.0];
-    [[menu layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.82 alpha:1.0] CGColor]];
     [root addSubview:menu];
     for (int k = 0; k < 3; k++) {
         UIButton *opt = [[UIButton alloc] initWithFrame:MakeRect(0, k * 44.0, mw, 44.0)];
@@ -1560,6 +1558,11 @@ static UILabel *gRandLabel = nil;
         [opt addTarget:self action:@selector(randomOptTapped:) forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(opt, &kLDDRandOptKey, [NSNumber numberWithDouble:(double)k], 1);
         [menu addSubview:opt];
+        if (k < 2) {
+            UIView *sep = [[UIView alloc] initWithFrame:MakeRect(14, (k + 1) * 44.0 - 0.5, mw - 28, 0.5)];
+            [sep setBackgroundColor:[UIColor colorWithWhite:0.88 alpha:1.0]];
+            [menu addSubview:sep];
+        }
     }
 }
 // 1.64: 根页面弹提示 (素材库页面的 showTip 是另一个类的, 这里需要自己的)
@@ -1646,9 +1649,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LDDPreviewSize(bw, &iw, &ih);
         return 14.0 + ih + 14.0;
     }
-    return 60.0;
+    return 52.0;
 }
-- (double)tableView:(id)tv estimatedHeightForRowAtIndexPath:(id)ip { return 60.0; }
+- (double)tableView:(id)tv estimatedHeightForRowAtIndexPath:(id)ip { return 52.0; }
 - (double)tableView:(id)tv heightForHeaderInSection:(NSInteger)s { return 0.0; }
 - (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return 96.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
@@ -1670,7 +1673,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.69";
+    NSString *ver = @"1.70";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1757,11 +1760,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         LDDUpdatePreview();
     } else if (row == 2) {
         // 1.9.140: 水平偏移 (左右调整显示区域, -200~200, 默认0)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"水平偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1773,7 +1776,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(posXChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2023];
@@ -1785,11 +1788,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[cell contentView] addSubview:vl];
     } else if (row == 3) {
         // 1.9.140: 垂直偏移 (上下调整显示区域, -200~200, 默认0)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"垂直偏移"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
         [sl setMinimumValue:-200];
         [sl setMaximumValue:200];
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1801,7 +1804,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(posYChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2024];
@@ -1813,11 +1816,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[cell contentView] addSubview:vl];
     } else if (row == 4) {
         // 1.9.133: 播放速度滑块 (0.5x~2.0x)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, 92, 22)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, 92, 22)];
         [label setText:@"播放速度"];
         [label setFont:[UIFont systemFontOfSize:15.0]];
         [[cell contentView] addSubview:label];
-        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 16, b.w - 196, 28)];
+        UISlider *sl = [[UISlider alloc] initWithFrame:MakeRect(112, 12, b.w - 196, 28)];
         [sl setMinimumValue:0.5];
         [sl setMaximumValue:3.0];   // 1.9.152: 支持到三倍速
         NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
@@ -1830,7 +1833,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [sl addTarget:self action:@selector(speedChanged:) forControlEvents:(1 << 12) | (1 << 6) | (1 << 7)];
         [[cell contentView] addSubview:sl];
         // 1.9.152: 滑块右侧实时数值 (倍速)
-        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 82, 19, 66, 22)];
+        UILabel *vl = [[UILabel alloc] initWithFrame:MakeRect(b.w - 66, 15, 50, 22)];
         [vl setTextAlignment:2];
         [vl setFont:[UIFont systemFontOfSize:15.0]];
         [vl setTag:2025];
@@ -1842,11 +1845,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [[cell contentView] addSubview:vl];
     } else if (row == 5) {
         // 1.66: 素材随机 (点击循环: 关 -> 全部随机 -> 不重复随机)
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 130, 22)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 130, 22)];
         [label setText:@"素材随机"];
         [label setFont:[UIFont systemFontOfSize:16.0]];
         [[cell contentView] addSubview:label];
-        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 130, 19, 114, 22)];
+        UILabel *vv = [[UILabel alloc] initWithFrame:MakeRect(b.w - 120, 11, 108, 28)];
         [vv setTextAlignment:2];
         [vv setFont:[UIFont systemFontOfSize:13.0]];
         [vv setTextColor:[UIColor colorWithRed:0.33 green:0.33 blue:0.33 alpha:1.0]];
@@ -1865,7 +1868,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [cell setSelectionStyle:1];
     } else {
         NSString *t = (row == 6 ? @"选择素材" : (row == 7 ? @"跳转素材目录" : (row == 8 ? @"预览通知" : @"立即注销")));
-        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 60, 22)];
+        UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 15, b.w - 60, 22)];
         [label setText:t];
         [label setFont:[UIFont systemFontOfSize:16.0]];
         if (row == 9) [label setTextColor:[UIColor redColor]];
@@ -1963,6 +1966,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 }
 // 1.52 自用版: 横幅停留/样式滑条已随钩子回滚一并移除
 // 1.68: 点击数值 -> 原位内联输入(同素材库改名交互), 不再弹 Alert
+static UISlider *gEditSlider = nil;
+static UILabel *gEditLabel = nil;
+static NSString *gEditKey = nil;
+static NSInteger gEditTag = 0;
 static const char kLDDValTagKey = 0;
 - (void)valTapped:(UITapGestureRecognizer *)g {
     id vl = [g view];
@@ -1975,6 +1982,9 @@ static const char kLDDValTagKey = 0;
     NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : @"lddgifbgSpeed"));
     id curV = [ud objectForKey:key];
     double dv = curV ? [curV doubleValue] : 0.0;
+    gEditTag = tag; gEditKey = key;
+    { id cv2 = [vl superview]; gEditSlider = (UISlider *)[cv2 viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))]; }
+    gEditLabel = (UILabel *)vl;
     CGRect rf = [root convertRect:[vl frame] fromView:[vl superview]];
     if (rf.oy < 8) rf.oy = 8;
     // 1.69: 不扩宽不左移 —— 完全贴数值原位, 避免盖住滑条
@@ -1986,7 +1996,7 @@ static const char kLDDValTagKey = 0;
     [tf setKeyboardType:0];    // 默认键盘(带完成键)
     [tf setReturnKeyType:9];
     [tf setTag:7777];
-    [tf addTarget:self action:@selector(inlineEditDone:) forControlEvents:(1 << 19)]; // EditingDidEndOnExit(按完成)
+    [tf addTarget:self action:@selector(inlineEditDone:) forControlEvents:(1 << 18) | (1 << 19)]; // EditingDidEndOnExit(按完成)
     objc_setAssociatedObject(tf, &kLDDValTagKey, [NSNumber numberWithDouble:(double)tag], 1);
     [root addSubview:tf];
     [tf becomeFirstResponder];
@@ -1994,32 +2004,29 @@ static const char kLDDValTagKey = 0;
 // 1.68: 内联输入提交(按完成或点其它行) —— 校验/入库/同步滑块和数值
 - (void)inlineEditDone:(UITextField *)tf {
     @try {
-        NSNumber *tn = objc_getAssociatedObject(tf, &kLDDValTagKey);
-        NSInteger tag = tn ? [tn doubleValue] : 0;
-        NSString *txt = [tf text];
-        double nv = [txt doubleValue];
-        if (tag == 2025) {
+        double nv = [[tf text] doubleValue];
+        if (gEditTag == 2025) {
             if (nv < 0.5) nv = 0.5;
             if (nv > 3.0) nv = 3.0;
         } else {
             if (nv < -200) nv = -200;
             if (nv > 200) nv = 200;
         }
-        if (tag == 2023 || tag == 2024 || tag == 2025) {
-            NSString *key = (tag == 2023 ? @"lddgifbgPosX" : (tag == 2024 ? @"lddgifbgPosY" : @"lddgifbgSpeed"));
-            NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-            [ud setObject:[NSNumber numberWithDouble:nv] forKey:key];
-            [ud synchronize];
-            WritePrefsFile(key, [NSNumber numberWithDouble:nv]);
-            id cv = [tf superview];
-            if (cv) {
-                UISlider *sl = (UISlider *)[cv viewWithTag:(tag == 2023 ? 3003 : (tag == 2024 ? 3004 : 3005))];
-                if (sl) [sl setValue:nv];
-            }
-            if (tag == 2023 || tag == 2024) LDDUpdatePreview();
+        if (gEditKey) {
+            NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            [ud2 setObject:[NSNumber numberWithDouble:nv] forKey:gEditKey];
+            [ud2 synchronize];
+            WritePrefsFile(gEditKey, [NSNumber numberWithDouble:nv]);
         }
+        if (gEditSlider) [gEditSlider setValue:nv];
+        if (gEditLabel) {
+            if (gEditTag == 2025) [gEditLabel setText:[NSString stringWithFormat:@"%.1fx", nv]];
+            else [gEditLabel setText:[NSString stringWithFormat:@"%.0f", nv]];
+        }
+        if (gEditTag == 2023 || gEditTag == 2024) LDDUpdatePreview();
     } @catch (id e) { LogB("INLINE-EXC"); }
     [tf removeFromSuperview];
+    gEditSlider = nil; gEditLabel = nil; gEditKey = nil; gEditTag = 0;
 }
 - (void)testNotification {
     PostTestNotification();
