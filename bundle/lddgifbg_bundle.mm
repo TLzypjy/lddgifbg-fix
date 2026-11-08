@@ -31,6 +31,10 @@ extern "C" id objc_getAssociatedObject(id obj, const char *key);
 extern "C" int notify_post(const char *name);
 extern "C" double CFAbsoluteTimeGetCurrent(void);
 extern "C" id UIImageJPEGRepresentation(id img, double q);
+// 1.85: 滑条拖动写盘节流的收尾补写
+extern "C" long long dispatch_time(long long base, long long delta);
+extern "C" void dispatch_after(long long when, void *queue, void (^block)(void));
+extern "C" struct dispatch_queue_s _dispatch_main_q;
 
 #define CLS(n) objc_getClass(n)
 static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
@@ -1627,6 +1631,8 @@ static UILabel *gRandLabel = nil;
         NSString *tsStr = [NSString stringWithFormat:@"%ld", (long)time(0)];
         id tsData = ((id(*)(id, SEL, NSUInteger))objc_msgSend)(tsStr, sel_registerName("dataUsingEncoding:"), (NSUInteger)4);
         [[NSFileManager defaultManager] createFileAtPath:@"/var/mobile/lddgifbg/__force_preview__" contents:tsData attributes:0];
+        // 1.85: 通知即时触发消费 (主进程监听后立刻弹预览), 文件轮询降为 1s 兜底
+        notify_post("com.tlzypjy.github/ForcePreview");
         return;
     } @catch (id e) {}
 }
@@ -1738,7 +1744,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.84";
+    NSString *ver = @"1.85";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -2066,8 +2072,23 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     { char bl[96]; snprintf(bl, sizeof(bl), "POSX-CHANGED %.2f", dv); LogB(bl); }
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgPosX"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgPosX", [NSNumber numberWithDouble:dv]);
+    // 1.85: 拖动写盘节流 —— 文件+synchronize 最多 0.25s 一次(原每帧最高60次/s), 尾值 0.35s 后补写
+    static double sLastWrX = 0; static int sFlushX = 0;
+    double nwX = CFAbsoluteTimeGetCurrent();
+    if (nwX - sLastWrX >= 0.25) {
+        sLastWrX = nwX;
+        [ud synchronize];
+        WritePrefsFile(@"lddgifbgPosX", [NSNumber numberWithDouble:dv]);
+    } else if (!sFlushX) {
+        sFlushX = 1;
+        dispatch_after(dispatch_time(0, 350 * 1000000LL), &_dispatch_main_q, ^{
+            NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            id curX = [ud2 objectForKey:@"lddgifbgPosX"];
+            if (curX) { [ud2 synchronize]; WritePrefsFile(@"lddgifbgPosX", curX); }
+            sLastWrX = CFAbsoluteTimeGetCurrent();
+            sFlushX = 0;
+        });
+    }
     { id rv = [ud objectForKey:@"lddgifbgPosX"]; double rd = rv ? [rv doubleValue] : -1.0; char bl[96]; snprintf(bl, sizeof(bl), "WRITE-POSX-OK %.2f", rd); LogB(bl); }
     // 1.9.152: 更新右侧数值显示
     id cv = [sl superview];
@@ -2080,8 +2101,23 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     { char bl[96]; snprintf(bl, sizeof(bl), "POSY-CHANGED %.2f", dv); LogB(bl); }
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgPosY"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgPosY", [NSNumber numberWithDouble:dv]);
+    // 1.85: 拖动写盘节流 (同水平偏移)
+    static double sLastWrY = 0; static int sFlushY = 0;
+    double nwY = CFAbsoluteTimeGetCurrent();
+    if (nwY - sLastWrY >= 0.25) {
+        sLastWrY = nwY;
+        [ud synchronize];
+        WritePrefsFile(@"lddgifbgPosY", [NSNumber numberWithDouble:dv]);
+    } else if (!sFlushY) {
+        sFlushY = 1;
+        dispatch_after(dispatch_time(0, 350 * 1000000LL), &_dispatch_main_q, ^{
+            NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            id curY = [ud2 objectForKey:@"lddgifbgPosY"];
+            if (curY) { [ud2 synchronize]; WritePrefsFile(@"lddgifbgPosY", curY); }
+            sLastWrY = CFAbsoluteTimeGetCurrent();
+            sFlushY = 0;
+        });
+    }
     { id rv = [ud objectForKey:@"lddgifbgPosY"]; double rd = rv ? [rv doubleValue] : -1.0; char bl[96]; snprintf(bl, sizeof(bl), "WRITE-POSY-OK %.2f", rd); LogB(bl); }
     // 1.9.152: 更新右侧数值显示
     id cv = [sl superview];
@@ -2094,8 +2130,23 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     { char bl[96]; snprintf(bl, sizeof(bl), "SPEED-CHANGED %.2f", dv); LogB(bl); }
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
     [ud setObject:[NSNumber numberWithDouble:dv] forKey:@"lddgifbgSpeed"];
-    [ud synchronize];
-    WritePrefsFile(@"lddgifbgSpeed", [NSNumber numberWithDouble:dv]);
+    // 1.85: 拖动写盘节流 (同水平偏移)
+    static double sLastWrS = 0; static int sFlushS = 0;
+    double nwS = CFAbsoluteTimeGetCurrent();
+    if (nwS - sLastWrS >= 0.25) {
+        sLastWrS = nwS;
+        [ud synchronize];
+        WritePrefsFile(@"lddgifbgSpeed", [NSNumber numberWithDouble:dv]);
+    } else if (!sFlushS) {
+        sFlushS = 1;
+        dispatch_after(dispatch_time(0, 350 * 1000000LL), &_dispatch_main_q, ^{
+            NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+            id curS = [ud2 objectForKey:@"lddgifbgSpeed"];
+            if (curS) { [ud2 synchronize]; WritePrefsFile(@"lddgifbgSpeed", curS); }
+            sLastWrS = CFAbsoluteTimeGetCurrent();
+            sFlushS = 0;
+        });
+    }
     // 1.9.137: 写后回读验证
     { id rv = [ud objectForKey:@"lddgifbgSpeed"]; double rd = rv ? [rv doubleValue] : -1.0; char bl[96]; snprintf(bl, sizeof(bl), "WRITE-SPEED-OK %.2f", rd); LogB(bl); }
     // 1.9.152: 更新右侧数值显示
