@@ -141,6 +141,36 @@ static void CheckForcePreviewTick(void);
 static void CheckTestNotifFlag(void);
 static void PostRealNotification(void);
 static void ProbeWrite(const char *line);
+// 1.83: 藏掉紧凑岛右侧的系统场景配件(通话声波/音频切换按钮) —— 用户要求不显示。
+// 递归找 _SAUIProvidedViewContainerView 包裹的配件容器, 只匹配: 宽35..62 高15..22,
+// 位于右半区且可见。通话岛胶囊高 33..50 才扫 (录音岛高63不扫, 展开大岛不扫);
+// 音乐岛按钮是 WGShortLookStyleButton 真实按钮类, 不匹配; 通知配件 alpha=0 自动跳过。
+static void LDDHideWaveInView(id v, double capW, int depth) {
+    if (!v || depth > 9) return;
+    @try {
+        id subs = ((id(*)(id, SEL))objc_msgSend)(v, sel_registerName("subviews"));
+        if (!subs) return;
+        for (id s in subs) {
+            @try {
+                Class cls = ((Class(*)(id, SEL))objc_msgSend)(s, sel_registerName("class"));
+                const char *cn = cls ? class_getName(cls) : (const char *)0;
+                if (cn && strstr(cn, "ProvidedViewContainer")) {
+                    CGRect f = ((CGRect(*)(id, SEL))objc_msgSend)(s, sel_registerName("frame"));
+                    double al = ((double(*)(id, SEL))objc_msgSend)(s, sel_registerName("alpha"));
+                    BOOL hd = ((BOOL(*)(id, SEL))objc_msgSend)(s, sel_registerName("isHidden"));
+                    if (!hd && al > 0.5 && f.w >= 35.0 && f.w <= 62.0 && f.h >= 15.0 && f.h <= 22.0
+                        && f.x >= capW * 0.45 && f.x + f.w >= capW - 80.0) {
+                        ((void(*)(id, SEL, BOOL))objc_msgSend)(s, sel_registerName("setHidden:"), YES);
+                        char wb[64];
+                        snprintf(wb, sizeof(wb), "WAVE-HIDDEN %.0fx%.0f", f.w, f.h);
+                        ProbeWrite(wb);
+                    }
+                }
+                LDDHideWaveInView(s, capW, depth + 1);
+            } @catch (id e) {}
+        }
+    } @catch (id e) {}
+}
 // 1.9.133: 播放速度 (GIF 定时器间隔 / AVPlayer rate 共用)
 static double cSpeed = 1.0;
 static double gLastAppliedSpeed = 1.0;
@@ -1237,20 +1267,14 @@ static void LDDIslandLayout(id self) {
                         }
                     } @catch (id e) { ProbeWrite("TREE-EXC"); }
                 }
+                // 1.83: 藏通话岛右侧系统声波按钮 (仅紧凑胶囊高33..50时扫)
+                if (sbB.h >= 33.0 && sbB.h <= 50.0) LDDHideWaveInView(supvB, sbB.w);
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
             }
         }
     }
-    // 1.9.142: 广播岛容器真实尺寸 -> 设置页预览 1:1 复刻 (尺寸变化才写, 避免高频写盘)
-    // 1.9.151: 仅岛展开时广播 (收起小尺寸会覆盖设置页预览的大药丸)
-    { static double iw = -1, ih = -1;
-      if (b.w >= 200 && b.h >= 40 && (b.w != iw || b.h != ih)) {
-          iw = b.w; ih = b.h;
-          NSString *sz = [NSString stringWithFormat:@"%.0f %.0f", b.w, b.h];
-          [sz writeToFile:@"/var/mobile/lddgifbg/__island_size__" atomically:YES encoding:4 error:0];
-      } }
     // 药丸圆角, 贴合灵动岛形状 (容器层裁切)
     id vlay = [view layer];
     // 1.9.173: 近方形容器(如付款面容验证圈)不再裁成正圆 —— 圆角限幅 8px, 并把背景扩展到父容器(弹窗内容层)尝试铺满整个方框
@@ -1833,8 +1857,11 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.82");
+    ProbeWrite("LDD-BUILD v1.83");
     ProbeWrite("CONSTRUCTOR-RAN");
+    // 1.83: 清理两个已废弃的辅助文件 (旧版日志残留 / 预览改固定尺寸后无人读取)
+    unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
+    unlink("/var/mobile/lddgifbg/__island_size__");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
     id clsCtrl = objc_getClass("UIView");
