@@ -151,7 +151,7 @@ static void LDDWaveLayerWalk(id lay, int depth, int logOn) {
     if (!lay || depth > 7) return;
     @try {
         Class cls = ((Class(*)(id, SEL))objc_msgSend)(lay, sel_registerName("class"));
-        const char *cn = cls ? class_getName((void *)cls) : (const char *)0;
+        const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
         CGRect b = ((CGRect(*)(id, SEL))objc_msgSend)(lay, sel_registerName("bounds"));
         double bw = ((double(*)(id, SEL))objc_msgSend)(lay, sel_registerName("borderWidth"));
         if (logOn && gWaveLayCnt < 80) {
@@ -178,7 +178,7 @@ static void LDDStripWaveBorder(id v, double capW) {
         for (id s in subs) {
             @try {
                 Class cls = ((Class(*)(id, SEL))objc_msgSend)(s, sel_registerName("class"));
-                const char *cn = cls ? class_getName((void *)cls) : (const char *)0;
+                const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
                 if (cn && strstr(cn, "ProvidedViewContainer")) {
                     CGRect f = ((CGRect(*)(id, SEL))objc_msgSend)(s, sel_registerName("frame"));
                     double al = ((double(*)(id, SEL))objc_msgSend)(s, sel_registerName("alpha"));
