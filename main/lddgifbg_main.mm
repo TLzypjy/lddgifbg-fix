@@ -1209,6 +1209,34 @@ static void LDDIslandLayout(id self) {
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
                 if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
+                // 1.82: 排查通话岛右侧描边框归属 —— 20s 一次 dump 岛容器视图树到探针文件
+                // (recursiveDescription: 每行=类名+指针+frame; 纯日志, 不改任何视图, 无新钩子)
+                static time_t gTreeLast = 0;
+                if (time(0) - gTreeLast >= 20) {
+                    gTreeLast = time(0);
+                    @try {
+                        NSString *tree = (NSString *)((id(*)(id, SEL))objc_msgSend)(supvB, sel_registerName("recursiveDescription"));
+                        const char *cs = tree ? ((const char *(*)(id, SEL))objc_msgSend)(tree, sel_registerName("UTF8String")) : (const char *)0;
+                        if (cs && cs[0]) {
+                            ProbeWrite("TREE-BEGIN");
+                            const char *p = cs;
+                            int tln = 0;
+                            while (p && p[0] && tln < 400) {
+                                const char *e = strchr(p, '\n');
+                                size_t len = e ? (size_t)(e - p) : strlen(p);
+                                if (len > 180) len = 180;
+                                char tbuf[192];
+                                memcpy(tbuf, p, len);
+                                tbuf[len] = 0;
+                                ProbeWrite(tbuf);
+                                tln++;
+                                if (!e) break;
+                                p = e + 1;
+                            }
+                            ProbeWrite("TREE-END");
+                        }
+                    } @catch (id e) { ProbeWrite("TREE-EXC"); }
+                }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
@@ -1805,7 +1833,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.81");
+    ProbeWrite("LDD-BUILD v1.82");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
