@@ -141,72 +141,6 @@ static void CheckForcePreviewTick(void);
 static void CheckTestNotifFlag(void);
 static void PostRealNotification(void);
 static void ProbeWrite(const char *line);
-// 1.83: 去掉通话岛右侧系统声波按钮的描边框 —— 按钮本体(声波)保留, 只清边框。
-// 找到右半区的 _SAUIProvidedViewContainerView 配件容器后, 遍历其图层树:
-// 任何 borderWidth >= 0.5 的图层清零; 同时把图层树类名打进探针 (若描边是
-// CAShapeLayer 路径画法则此招无效, 由探针日志定位后下版精确处理)。
-static int gWaveLayCnt = 0;
-static time_t gWaveLayLast = 0;
-static void LDDWaveLayerWalk(id lay, int depth, int logOn) {
-    if (!lay || depth > 7) return;
-    @try {
-        Class cls = ((Class(*)(id, SEL))objc_msgSend)(lay, sel_registerName("class"));
-        const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
-        CGRect b = ((CGRect(*)(id, SEL))objc_msgSend)(lay, sel_registerName("bounds"));
-        double bw = ((double(*)(id, SEL))objc_msgSend)(lay, sel_registerName("borderWidth"));
-        if (logOn && gWaveLayCnt < 80) {
-            char lb[160];
-            snprintf(lb, sizeof(lb), "LAY d%d %s %.0fx%.0f bw%.1f", depth, cn ? cn : "?", b.w, b.h, bw);
-            ProbeWrite(lb);
-            gWaveLayCnt++;
-        }
-        if (bw >= 0.5) {
-            ((void(*)(id, SEL, double))objc_msgSend)(lay, sel_registerName("setBorderWidth:"), 0.0);
-            ProbeWrite("WAVE-BORDER-STRIP");
-        }
-        id sls = ((id(*)(id, SEL))objc_msgSend)(lay, sel_registerName("sublayers"));
-        if (sls) {
-            for (id sl in sls) LDDWaveLayerWalk(sl, depth + 1, logOn);
-        }
-    } @catch (id e) {}
-}
-static void LDDStripWaveBorder(id v, double capW) {
-    if (!v) return;
-    @try {
-        id subs = ((id(*)(id, SEL))objc_msgSend)(v, sel_registerName("subviews"));
-        if (!subs) return;
-        for (id s in subs) {
-            @try {
-                Class cls = ((Class(*)(id, SEL))objc_msgSend)(s, sel_registerName("class"));
-                const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
-                if (cn && strstr(cn, "ProvidedViewContainer")) {
-                    CGRect f = ((CGRect(*)(id, SEL))objc_msgSend)(s, sel_registerName("frame"));
-                    double al = ((double(*)(id, SEL))objc_msgSend)(s, sel_registerName("alpha"));
-                    BOOL hd = ((BOOL(*)(id, SEL))objc_msgSend)(s, sel_registerName("isHidden"));
-                    if (!hd && al > 0.5 && f.w >= 35.0 && f.w <= 62.0 && f.h >= 15.0 && f.h <= 22.0
-                        && f.ox >= capW * 0.45 && f.ox + f.w >= capW - 80.0) {
-                        // 图层树探针 20s 一次; 边框清理每次都跑 (幂等, 系统重建后被再次清掉)
-                        // 1.84 修复: 上版把视图当图层传进遍历器, sublayers 抛异常被吞, 图层树全空
-                        id wlay = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("layer"));
-                        if (wlay) {
-                            time_t nt = time(0);
-                            if (nt - gWaveLayLast >= 20) {
-                                gWaveLayLast = nt;
-                                gWaveLayCnt = 0;
-                                ProbeWrite("WAVE-LAYERS-BEGIN");
-                                LDDWaveLayerWalk(wlay, 0, 1);
-                                ProbeWrite("WAVE-LAYERS-END");
-                            } else {
-                                LDDWaveLayerWalk(wlay, 0, 0);   // 静默路径: 只清边框不刷日志
-                            }
-                        }
-                    }
-                }
-                LDDStripWaveBorder(s, capW);
-            } @catch (id e) {}
-        }
-    } @catch (id e) {}
-}
 // 1.9.133: 播放速度 (GIF 定时器间隔 / AVPlayer rate 共用)
 static double cSpeed = 1.0;
 static double gLastAppliedSpeed = 1.0;
@@ -463,6 +397,10 @@ static int ProbeCountLines(const char *path) {
     return n;
 }
 static void ProbeWrite(const char *line) {
+    // 1.85: 探针日志整体停用(调试结束) —— 岛布局不再写任何文件, 零常驻 IO;
+    // 历史日志文件在构造器统一删除。以下原实现保留但不可达, 需要时删掉 return 即可恢复。
+    (void)line;
+    return;
     // 1.63: 连续重复行去重 —— 稳态下 POS/STREAM/MAT 等探针大量重复, 不再逐条刷盘(降 CPU/发热)
     static char gProbeLast[192] = "";
     if (line && strncmp(line, gProbeLast, sizeof(gProbeLast)) == 0) return;
@@ -883,17 +821,16 @@ static void CheckForcePreviewTick(void) {
     CheckTestNotifFlag();
 }
 
-// 触发监控: 独立 GCD 轮询 (0.1s), 不依赖 SB 布局回调。
-// 之前 CheckForcePreviewTick 只在 CtrlLayoutHook 里调用且被尺寸过滤挡掉,
-// 用户在设置页点预览时若 SB 无布局事件, 触发文件无人消费 -> "要点好几次才弹"。
+// 触发监控: 1.85 起预览消费由 Darwin 通知即时驱动 (bundle notify_post), 此轮询仅作兜底,
+// 频率 200ms -> 1s (常驻唤醒从 5次/s 降到 1次/s); 通知路径延迟 <50ms, 兜底路径最迟 1s。
 static void ForceMonitorTick(void) {
     // 1.9.161: 主队列轮询 block 兜底 —— 异常不再冒泡到 runloop 崩进程
     @try { CheckForcePreviewTick(); }
     @catch (id e) { LogReason("FMT-EXC", e); }
-    dispatch_after(dispatch_time(0, 200 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
+    dispatch_after(dispatch_time(0, 1000 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
 }
 static void StartForceMonitor(void) {
-    dispatch_after(dispatch_time(0, 200 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
+    dispatch_after(dispatch_time(0, 1000 * 1000000LL), &_dispatch_main_q, ^{ ForceMonitorTick(); });
 }
 
 static BOOL ForcePreviewActive(void) { return time(0) < gForceUntil; }
@@ -1275,36 +1212,6 @@ static void LDDIslandLayout(id self) {
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
                 if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
-                // 1.82: 排查通话岛右侧描边框归属 —— 20s 一次 dump 岛容器视图树到探针文件
-                // (recursiveDescription: 每行=类名+指针+frame; 纯日志, 不改任何视图, 无新钩子)
-                static time_t gTreeLast = 0;
-                if (time(0) - gTreeLast >= 20) {
-                    gTreeLast = time(0);
-                    @try {
-                        NSString *tree = (NSString *)((id(*)(id, SEL))objc_msgSend)(supvB, sel_registerName("recursiveDescription"));
-                        const char *cs = tree ? ((const char *(*)(id, SEL))objc_msgSend)(tree, sel_registerName("UTF8String")) : (const char *)0;
-                        if (cs && cs[0]) {
-                            ProbeWrite("TREE-BEGIN");
-                            const char *p = cs;
-                            int tln = 0;
-                            while (p && p[0] && tln < 400) {
-                                const char *e = strchr(p, '\n');
-                                size_t len = e ? (size_t)(e - p) : strlen(p);
-                                if (len > 180) len = 180;
-                                char tbuf[192];
-                                memcpy(tbuf, p, len);
-                                tbuf[len] = 0;
-                                ProbeWrite(tbuf);
-                                tln++;
-                                if (!e) break;
-                                p = e + 1;
-                            }
-                            ProbeWrite("TREE-END");
-                        }
-                    } @catch (id e) { ProbeWrite("TREE-EXC"); }
-                }
-                // 1.83: 去掉通话岛右侧系统声波按钮的边框 (按钮保留, 仅紧凑胶囊高33..50时扫)
-                if (sbB.h >= 33.0 && sbB.h <= 50.0) LDDStripWaveBorder(supvB, sbB.w);
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
@@ -1458,7 +1365,8 @@ static void CtrlLayoutHook(id self, SEL _cmd) {
         if (origCtrlLayout) origCtrlLayout(self, _cmd);
         return;
     }
-    CheckForcePreviewTick();
+    // 1.85: 布局回调里不再查触发文件 —— 布局风暴时最高 20次/s 的 access() 系统调用移除,
+    // 预览消费已由 Darwin 通知即时驱动 + 1s 轮询兜底, 此处纯粹是重复开销
     // 优化2: 类名匹配缓存 (同一类只做一次 strstr, 之后指针比较)
     static const char *gMatchNames[16]; static int gMatchN = 0;
     static const char *gSkipNames[64]; static int gSkipN = 0;
@@ -1893,11 +1801,13 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.84");
+    ProbeWrite("LDD-BUILD v1.85");
     ProbeWrite("CONSTRUCTOR-RAN");
-    // 1.83: 清理两个已废弃的辅助文件 (旧版日志残留 / 预览改固定尺寸后无人读取)
+    // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
     unlink("/var/mobile/lddgifbg/__island_size__");
+    unlink("/var/mobile/lddgifbg/__plugin_probe__.txt");
+    unlink("/var/mobile/lddgifbg/__force_preview__.consumed");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
     id clsCtrl = objc_getClass("UIView");
@@ -1927,6 +1837,11 @@ static void LDDInit(void) {
     notify_register_dispatch("com.tlzypjy.github/MatChanged", &notifyMatTok, (void *)&_dispatch_main_q, ^(int tok){
         gMatChangedFlag = 1;
         ProbeWrite("MAT-CHANGED-SIG");
+    });
+    // 1.85: 预览触发改通知驱动 —— 设置页 notify_post 即时消费触发文件, 不再依赖 200ms 轮询
+    static int notifyFPTok = 0;
+    notify_register_dispatch("com.tlzypjy.github/ForcePreview", &notifyFPTok, (void *)&_dispatch_main_q, ^(int tok){
+        @try { ConsumeForcePreview(); } @catch (id e) { }
     });
     // 触发文件独立轮询: 与布局无关, 点预览后 0.1s 内即弹
     StartForceMonitor();
