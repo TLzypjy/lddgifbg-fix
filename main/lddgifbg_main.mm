@@ -141,32 +141,64 @@ static void CheckForcePreviewTick(void);
 static void CheckTestNotifFlag(void);
 static void PostRealNotification(void);
 static void ProbeWrite(const char *line);
-// 1.83: 藏掉紧凑岛右侧的系统场景配件(通话声波/音频切换按钮) —— 用户要求不显示。
-// 递归找 _SAUIProvidedViewContainerView 包裹的配件容器, 只匹配: 宽35..62 高15..22,
-// 位于右半区且可见。通话岛胶囊高 33..50 才扫 (录音岛高63不扫, 展开大岛不扫);
-// 音乐岛按钮是 WGShortLookStyleButton 真实按钮类, 不匹配; 通知配件 alpha=0 自动跳过。
-static void LDDHideWaveInView(id v, double capW, int depth) {
-    if (!v || depth > 9) return;
+// 1.83: 去掉通话岛右侧系统声波按钮的描边框 —— 按钮本体(声波)保留, 只清边框。
+// 找到右半区的 _SAUIProvidedViewContainerView 配件容器后, 遍历其图层树:
+// 任何 borderWidth >= 0.5 的图层清零; 同时把图层树类名打进探针 (若描边是
+// CAShapeLayer 路径画法则此招无效, 由探针日志定位后下版精确处理)。
+static int gWaveLayCnt = 0;
+static time_t gWaveLayLast = 0;
+static void LDDWaveLayerWalk(id lay, int depth, int logOn) {
+    if (!lay || depth > 7) return;
+    @try {
+        Class cls = ((Class(*)(id, SEL))objc_msgSend)(lay, sel_registerName("class"));
+        const char *cn = cls ? class_getName((void *)cls) : (const char *)0;
+        CGRect b = ((CGRect(*)(id, SEL))objc_msgSend)(lay, sel_registerName("bounds"));
+        double bw = ((double(*)(id, SEL))objc_msgSend)(lay, sel_registerName("borderWidth"));
+        if (logOn && gWaveLayCnt < 80) {
+            char lb[160];
+            snprintf(lb, sizeof(lb), "LAY d%d %s %.0fx%.0f bw%.1f", depth, cn ? cn : "?", b.w, b.h, bw);
+            ProbeWrite(lb);
+            gWaveLayCnt++;
+        }
+        if (bw >= 0.5) {
+            ((void(*)(id, SEL, double))objc_msgSend)(lay, sel_registerName("setBorderWidth:"), 0.0);
+            ProbeWrite("WAVE-BORDER-STRIP");
+        }
+        id sls = ((id(*)(id, SEL))objc_msgSend)(lay, sel_registerName("sublayers"));
+        if (sls) {
+            for (id sl in sls) LDDWaveLayerWalk(sl, depth + 1, logOn);
+        }
+    } @catch (id e) {}
+}
+static void LDDStripWaveBorder(id v, double capW) {
+    if (!v) return;
     @try {
         id subs = ((id(*)(id, SEL))objc_msgSend)(v, sel_registerName("subviews"));
         if (!subs) return;
         for (id s in subs) {
             @try {
                 Class cls = ((Class(*)(id, SEL))objc_msgSend)(s, sel_registerName("class"));
-                const char *cn = cls ? class_getName(cls) : (const char *)0;
+                const char *cn = cls ? class_getName((void *)cls) : (const char *)0;
                 if (cn && strstr(cn, "ProvidedViewContainer")) {
                     CGRect f = ((CGRect(*)(id, SEL))objc_msgSend)(s, sel_registerName("frame"));
                     double al = ((double(*)(id, SEL))objc_msgSend)(s, sel_registerName("alpha"));
                     BOOL hd = ((BOOL(*)(id, SEL))objc_msgSend)(s, sel_registerName("isHidden"));
                     if (!hd && al > 0.5 && f.w >= 35.0 && f.w <= 62.0 && f.h >= 15.0 && f.h <= 22.0
-                        && f.x >= capW * 0.45 && f.x + f.w >= capW - 80.0) {
-                        ((void(*)(id, SEL, BOOL))objc_msgSend)(s, sel_registerName("setHidden:"), YES);
-                        char wb[64];
-                        snprintf(wb, sizeof(wb), "WAVE-HIDDEN %.0fx%.0f", f.w, f.h);
-                        ProbeWrite(wb);
+                        && f.ox >= capW * 0.45 && f.ox + f.w >= capW - 80.0) {
+                        // 图层树探针 20s 一次; 边框清理每次都跑 (幂等, 系统重建后被再次清掉)
+                        time_t nt = time(0);
+                        if (nt - gWaveLayLast >= 20) {
+                            gWaveLayLast = nt;
+                            gWaveLayCnt = 0;
+                            ProbeWrite("WAVE-LAYERS-BEGIN");
+                            LDDWaveLayerWalk(s, 0, 1);
+                            ProbeWrite("WAVE-LAYERS-END");
+                        } else {
+                            LDDWaveLayerWalk(s, 0, 0);   // 静默路径: 只清边框不刷日志
+                        }
                     }
                 }
-                LDDHideWaveInView(s, capW, depth + 1);
+                LDDStripWaveBorder(s, capW);
             } @catch (id e) {}
         }
     } @catch (id e) {}
@@ -1267,8 +1299,8 @@ static void LDDIslandLayout(id self) {
                         }
                     } @catch (id e) { ProbeWrite("TREE-EXC"); }
                 }
-                // 1.83: 藏通话岛右侧系统声波按钮 (仅紧凑胶囊高33..50时扫)
-                if (sbB.h >= 33.0 && sbB.h <= 50.0) LDDHideWaveInView(supvB, sbB.w);
+                // 1.83: 去掉通话岛右侧系统声波按钮的边框 (按钮保留, 仅紧凑胶囊高33..50时扫)
+                if (sbB.h >= 33.0 && sbB.h <= 50.0) LDDStripWaveBorder(supvB, sbB.w);
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
