@@ -186,15 +186,19 @@ static void LDDStripWaveBorder(id v, double capW) {
                     if (!hd && al > 0.5 && f.w >= 35.0 && f.w <= 62.0 && f.h >= 15.0 && f.h <= 22.0
                         && f.ox >= capW * 0.45 && f.ox + f.w >= capW - 80.0) {
                         // 图层树探针 20s 一次; 边框清理每次都跑 (幂等, 系统重建后被再次清掉)
-                        time_t nt = time(0);
-                        if (nt - gWaveLayLast >= 20) {
-                            gWaveLayLast = nt;
-                            gWaveLayCnt = 0;
-                            ProbeWrite("WAVE-LAYERS-BEGIN");
-                            LDDWaveLayerWalk(s, 0, 1);
-                            ProbeWrite("WAVE-LAYERS-END");
-                        } else {
-                            LDDWaveLayerWalk(s, 0, 0);   // 静默路径: 只清边框不刷日志
+                        // 1.84 修复: 上版把视图当图层传进遍历器, sublayers 抛异常被吞, 图层树全空
+                        id wlay = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("layer"));
+                        if (wlay) {
+                            time_t nt = time(0);
+                            if (nt - gWaveLayLast >= 20) {
+                                gWaveLayLast = nt;
+                                gWaveLayCnt = 0;
+                                ProbeWrite("WAVE-LAYERS-BEGIN");
+                                LDDWaveLayerWalk(wlay, 0, 1);
+                                ProbeWrite("WAVE-LAYERS-END");
+                            } else {
+                                LDDWaveLayerWalk(wlay, 0, 0);   // 静默路径: 只清边框不刷日志
+                            }
                         }
                     }
                 }
@@ -1889,7 +1893,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.83");
+    ProbeWrite("LDD-BUILD v1.84");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.83: 清理两个已废弃的辅助文件 (旧版日志残留 / 预览改固定尺寸后无人读取)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
