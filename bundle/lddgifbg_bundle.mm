@@ -1509,6 +1509,8 @@ static void LDDNotifyMatChanged(void) {
 
 // 1.68: 素材随机锚定弹层
 static const char kLDDRandOptKey = 0;
+// 1.86: 通知窗口样式选择手势的序号关联
+static const char kLDDStyleKey = 0;
 
 @implementation lddgifbgRootListController
 // 1.72: 关闭随机弹层(弹层挂在窗口层, 从 keyWindow 找)
@@ -1542,6 +1544,17 @@ static UILabel *gRandLabel = nil;
         gRandLabel = nil;
     }
     [self dismissRandomPicker];
+}
+// 1.86: 通知窗口样式选择 (0标准 1紧凑 2迷你 3自定义) —— 自制通知卡片的样式预选, 先存档
+- (void)styleTapped:(UITapGestureRecognizer *)g {
+    NSNumber *k = objc_getAssociatedObject(g, &kLDDStyleKey);
+    long st = k ? (long)[k doubleValue] : 0;
+    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+    [ud setObject:[NSNumber numberWithDouble:(double)st] forKey:@"lddgifbgNotifStyle"];
+    [ud synchronize];
+    WritePrefsFile(@"lddgifbgNotifStyle", [NSNumber numberWithDouble:(double)st]);
+    id tb = [self table];
+    if (tb) [tb reloadData];
 }
 // 1.72: 锚定弹层挂窗口层 —— 屏幕坐标定位, 永远紧贴方框下方, 不随表格滚动错位
 // 菜单紧凑(行高 38), 选项文字居中带 ✓, 白卡片圆角+阴影, 淡入
@@ -1662,13 +1675,14 @@ static UILabel *gRandLabel = nil;
     @catch (id e) { LogB("ROOT-SPEC-EXC"); }
     return [NSArray array];
 }
-- (NSInteger)numberOfSectionsInTableView:(id)tv { return 1; }
+// 1.86: 4 个分区 —— 0=原功能行 1=通知窗口样式选择卡片 2=自定义样式设置卡片 3=样式说明文字
+- (NSInteger)numberOfSectionsInTableView:(id)tv { return 4; }
 // 1.9.140: 行数 10 (0/1开关 2预览 3水平偏移 4垂直偏移 5速度 6选素材 7跳转 8预览通知 9注销)
 // 1.9.184: 行数 10 (版本/作者 移除, 改底部居中版权 footer)
 // 1.52 自用版: 行数 9 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
 // 1.50/1.51 的横幅样式/停留时长行已随崩溃钩子一并移除(见 main.mm 注释)
 // 1.66: 行数 10 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
-- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return 10; }
+- (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s { return s == 0 ? 10 : 1; }
 // 1.66: 素材随机模式名 (0关 1全部随机 2不重复随机)
 static NSString *LDDRandomName(long s) {
     if (s == 1) return @"顺序显示";
@@ -1707,6 +1721,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     *pih = 70.0;
 }
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
+    // 1.86: 新分区行高 (1=样式选择卡 182 / 2=自定义设置卡 56 / 3=说明文字 118)
+    if ([ip section] == 1) return 182.0;
+    if ([ip section] == 2) return 56.0;
+    if ([ip section] == 3) return 118.0;
     if ([ip row] == 1) {
         // 1.9.146: 预览行高度贴合预览药丸, 消除上下大面积留白
         CGRect tb = [tv bounds];
@@ -1724,12 +1742,15 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (double)tableView:(id)tv estimatedHeightForHeaderInSection:(NSInteger)s { return 0.0; }
 - (double)tableView:(id)tv estimatedHeightForFooterInSection:(NSInteger)s { return 96.0; }
 - (double)tableView:(id)tv heightForHeaderInSection:(NSInteger)s { return 0.0; }
-- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return 96.0; }
+// 1.86: 页脚分区化 —— 仅最后一个分区(3)挂作者页脚, 其余分区用窄间距隔开
+- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 3 ? 96.0 : 14.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
 - (NSInteger)tableView:(id)tv titleAlignmentForFooterInSection:(NSInteger)s { return 0; }
 - (id)tableView:(id)tv viewForHeaderInSection:(NSInteger)s { return nil; }
 // 1.9.185: 底部三行版权 footer (作者/版本号/越狱源), 越狱源点击复制
+// 1.86: 仅分区 3 渲染作者页脚, 其余分区返回空(用 14pt 间距隔开各分区)
 - (id)tableView:(id)tv viewForFooterInSection:(NSInteger)s {
+    if (s != 3) return nil;
     // 1.4: 全宽 label + textAlignment 居中 (与容器宽度无关, 不会偏), 字号改小
     CGRect tb = ((CGRect(*)(id, SEL))objc_msgSend)(tv, sel_registerName("bounds"));
     double sw = tb.w;
@@ -1744,7 +1765,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.85";
+    NSString *ver = @"1.86";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1767,6 +1788,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (id)tableView:(id)tv titleForFooterInSection:(NSInteger)s { return @""; }
 - (id)tableView:(id)tv cellForRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
+    NSInteger sec = [ip section];
     static int logged = 0;
     if (!logged) { logged = 1; LogB("ROOT-CELL-RENDERED"); }
     UITableView *table = (UITableView *)tv;
@@ -1783,6 +1805,154 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     for (UIView *v in [[cell contentView] subviews]) { if (v) [v removeFromSuperview]; }
     [cell setSelectionStyle:0];
     [cell setAccessoryType:0];
+    if (sec == 1) {
+        // 1.86: 通知窗口样式选择卡片 (复刻灵动通知: 标准/紧凑/迷你/自定义 四选一)
+        [cell setSelectionStyle:0];
+        UIView *card = [[UIView alloc] initWithFrame:MakeRect(8, 6, b.w - 16, 170)];
+        [card setBackgroundColor:[UIColor whiteColor]];
+        [[card layer] setCornerRadius:14.0];
+        [[card layer] setBorderWidth:0.5];
+        [[card layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.88 alpha:1.0] CGColor]];
+        [[card layer] setShadowOpacity:0.10];
+        [[card layer] setShadowRadius:6.0];
+        CGSize wso; wso.w = 0.0; wso.h = 2.0;
+        [[card layer] setShadowOffset:wso];
+        [[cell contentView] addSubview:card];
+        double cw = b.w - 16.0;
+        UILabel *ti = [[UILabel alloc] initWithFrame:MakeRect(0, 8, cw, 18)];
+        [ti setText:@"灵动岛通知窗口样式选择"];
+        [ti setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
+        [ti setTextAlignment:1];
+        [ti setFont:[UIFont systemFontOfSize:13.0]];
+        [card addSubview:ti];
+        double tw = 78.0, thh = 66.0;
+        double gap = (cw - 16.0 - tw * 4.0) / 3.0;
+        if (gap < 4.0) gap = 4.0;
+        double x0 = (cw - (tw * 4.0 + gap * 3.0)) / 2.0;
+        NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+        id sv2 = [ud2 objectForKey:@"lddgifbgNotifStyle"];
+        long cur = sv2 ? (long)[sv2 doubleValue] : 0;
+        for (int i = 0; i < 4; i++) {
+            double cx = x0 + i * (tw + gap);
+            UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 32, tw, 122)];
+            [col setUserInteractionEnabled:YES];
+            UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(styleTapped:)];
+            objc_setAssociatedObject(tg, &kLDDStyleKey, [NSNumber numberWithDouble:(double)i], 1);
+            [col addGestureRecognizer:tg];
+            [card addSubview:col];
+            // 缩略图: 浅绿底 + 绿色圆(壁纸示意)
+            UIView *th = [[UIView alloc] initWithFrame:MakeRect(0, 0, tw, thh)];
+            [th setBackgroundColor:[UIColor colorWithRed:0.93 green:0.95 blue:0.93 alpha:1.0]];
+            [[th layer] setCornerRadius:12.0];
+            [th setClipsToBounds:YES];
+            [col addSubview:th];
+            UIView *blob = [[UIView alloc] initWithFrame:MakeRect((tw - 56.0) / 2.0, thh - 28.0, 56, 56)];
+            [blob setBackgroundColor:[UIColor colorWithRed:0.60 green:0.78 blue:0.52 alpha:1.0]];
+            [[blob layer] setCornerRadius:28.0];
+            [th addSubview:blob];
+            // 岛形药丸 (四种样式不同大小)
+            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(7, 11, 64, 26) : (i == 1 ? MakeRect(11, 13, 56, 22) : (i == 2 ? MakeRect(18, 15, 42, 18) : MakeRect(22, 17, 32, 14))))];
+            [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
+            CGRect pfr = [pill frame];
+            [[pill layer] setCornerRadius:pfr.h / 2.0];
+            [th addSubview:pill];
+            if (i == 0) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(4, 6, 14, 14)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:4.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(22, 8, 34, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+                UIView *l2 = [[UIView alloc] initWithFrame:MakeRect(22, 15, 26, 4)];
+                [l2 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.5]];
+                [[l2 layer] setCornerRadius:2.0];
+                [pill addSubview:l2];
+            } else if (i == 1) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(3, 4, 13, 13)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:3.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(19, 9, 30, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+            } else if (i == 2) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(2, 3, 12, 12)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:3.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(17, 7, 20, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+            } else {
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(4, 5, 20, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+                // 自定义: 右侧小圆点
+                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(60, 24, 9, 9)];
+                [dot setBackgroundColor:[UIColor colorWithWhite:0.55 alpha:1.0]];
+                [[dot layer] setCornerRadius:4.5];
+                [th addSubview:dot];
+            }
+            // 名字
+            UILabel *nm = [[UILabel alloc] initWithFrame:MakeRect(0, thh + 6, tw, 16)];
+            [nm setText:(i == 0 ? @"标准" : (i == 1 ? @"紧凑" : (i == 2 ? @"迷你" : @"自定义")))];
+            [nm setTextAlignment:1];
+            [nm setFont:[UIFont boldSystemFontOfSize:13.0]];
+            [col addSubview:nm];
+            // 单选圈 (选中=蓝底白勾, 未选=白底蓝圈)
+            UIView *rd = [[UIView alloc] initWithFrame:MakeRect((tw - 22.0) / 2.0, thh + 28, 22, 22)];
+            [[rd layer] setCornerRadius:11.0];
+            if (cur == i) {
+                [rd setBackgroundColor:[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0]];
+                UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 22, 22)];
+                [ck setText:@"✓"];
+                [ck setTextColor:[UIColor whiteColor]];
+                [ck setTextAlignment:1];
+                [ck setFont:[UIFont boldSystemFontOfSize:14.0]];
+                [rd addSubview:ck];
+            } else {
+                [rd setBackgroundColor:[UIColor whiteColor]];
+                [[rd layer] setBorderWidth:1.5];
+                [[rd layer] setBorderColor:(CGColorRef)[[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0] CGColor]];
+            }
+            [col addSubview:rd];
+        }
+        return cell;
+    }
+    if (sec == 2) {
+        // 1.86: 自定义样式设置卡片 (标题卡, 具体设置项随卡片引擎后续加入)
+        UIView *card = [[UIView alloc] initWithFrame:MakeRect(8, 6, b.w - 16, 44)];
+        [card setBackgroundColor:[UIColor whiteColor]];
+        [[card layer] setCornerRadius:14.0];
+        [[card layer] setBorderWidth:0.5];
+        [[card layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.88 alpha:1.0] CGColor]];
+        [[card layer] setShadowOpacity:0.10];
+        [[card layer] setShadowRadius:6.0];
+        CGSize wso2; wso2.w = 0.0; wso2.h = 2.0;
+        [[card layer] setShadowOffset:wso2];
+        [[cell contentView] addSubview:card];
+        UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 11, b.w - 48, 22)];
+        [tt setText:@"自定义样式设置"];
+        [tt setFont:[UIFont boldSystemFontOfSize:16.0]];
+        [card addSubview:tt];
+        return cell;
+    }
+    if (sec == 3) {
+        // 1.86: 四种样式说明 (灰字, 无卡片)
+        UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 4, b.w - 24, 110)];
+        [ds setNumberOfLines:0];
+        [ds setText:@"四种样式:\n1.图标+时间+APP名称+标题+双行内容(不滚动显示)\n2.图标+时间+APP名称+标题+单行内容(滚动显示)\n3.图标+时间+APP名称+标题+内容(同行滚动显示)\n4.以标准样式为基础，自定义图标、时间、标题、APP名称、副标题和内容"];
+        [ds setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
+        [ds setTextAlignment:1];
+        [ds setFont:[UIFont systemFontOfSize:12.0]];
+        [[cell contentView] addSubview:ds];
+        return cell;
+    }
     if (row == 0) {
         UILabel *label = [[UILabel alloc] initWithFrame:MakeRect(16, 19, b.w - 110, 22)];
         [label setText:@"功能启用"];
@@ -2023,11 +2193,14 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 }
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
+    NSInteger sec = [ip section];
     [(UITableView *)tv deselectRowAtIndexPath:ip animated:YES];
     // 1.68: 内联输入框开着时, 先提交再消费本次点击
     UIView *rootV = [self view];
     UITextField *pend = (UITextField *)[rootV viewWithTag:7777];
     if (pend) { [self inlineEditDone:pend]; return; }
+    // 1.86: 新分区 (样式选择/自定义设置/说明) 行点击不做事 —— 样式选择走缩略图手势
+    if (sec != 0) return;
     // 1.66: 行号与 UI 同步 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5素材随机 6选素材 7跳转 8预览通知 9注销)
     if (row == 5) {
         // 1.68: 锚定弹层选择随机模式(同灵动通知"点击动作"交互)
