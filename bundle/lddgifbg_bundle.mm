@@ -1784,7 +1784,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.89";
+    NSString *ver = @"1.90";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1827,15 +1827,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     if (sec == 1) {
         // 1.87: 复刻灵动通知排版 —— 灰标题在分区头(卡片外); 大白卡: 缩略图(黑描边)+名字+单选圈+间隔+自定义样式设置标题
         [cell setSelectionStyle:0];
-        UIView *card = [[UIView alloc] initWithFrame:MakeRect(8, 6, b.w - 16, 202)];
-        [card setBackgroundColor:[UIColor whiteColor]];
-        [[card layer] setCornerRadius:14.0];
-        [[card layer] setShadowOpacity:0.10];
-        [[card layer] setShadowRadius:6.0];
-        CGSize wso; wso.w = 0.0; wso.h = 2.0;
-        [[card layer] setShadowOffset:wso];
-        [[cell contentView] addSubview:card];
-        double cw = b.w - 16.0;
+        // 1.90: 去掉白卡片 —— 内容直接坐在页面背景上 (同灵动通知, 消除两层背景感)
+        double cw = b.w;
         // 1.87: 缩略图宽度按实际卡宽动态算 (左右各12边距 + 3个10间距), 永不溢出
         double tw = (cw - 54.0) / 4.0;
         double thh = 66.0;
@@ -1844,12 +1837,12 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         long cur = sv2 ? (long)[sv2 doubleValue] : 0;
         for (int i = 0; i < 4; i++) {
             double cx = 12.0 + i * (tw + 10.0);
-            UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 8, tw, 118)];
+            UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 2, tw, 118)];
             [col setUserInteractionEnabled:YES];
             UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(styleTapped:)];
             objc_setAssociatedObject(tg, &kLDDStyleKey, [NSNumber numberWithDouble:(double)i], 1);
             [col addGestureRecognizer:tg];
-            [card addSubview:col];
+            [[cell contentView] addSubview:col];
             // 缩略图: 浅绿底 + 绿色圆(壁纸示意) + 黑描边 (同灵动通知)
             UIView *th = [[UIView alloc] initWithFrame:MakeRect(0, 0, tw, thh)];
             // 1.89: 缩略图透明底 (避免白卡上再叠一层底色的双层背景感), 只留黑描边+绿圆+药丸
@@ -1864,7 +1857,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [[blob layer] setCornerRadius:28.0];
             [th addSubview:blob];
             // 岛形药丸 (四种样式不同大小, 宽度随缩略图自适应)
-            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(4, 12, tw - 8, 26) : (i == 1 ? MakeRect(9, 13, tw - 18, 22) : (i == 2 ? MakeRect(15, 15, tw - 30, 18) : MakeRect(20, 17, tw - 40, 14))))];
+            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(4, 0, tw - 8, 26) : (i == 1 ? MakeRect(9, 0, tw - 18, 22) : (i == 2 ? MakeRect(15, 0, tw - 30, 18) : MakeRect(20, 0, tw - 40, 14))))];
             [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
             CGRect pfr = [pill frame];
             [[pill layer] setCornerRadius:pfr.h / 2.0];
@@ -1936,7 +1929,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [col addSubview:rd];
         }
         // 1.87: 自定义样式设置标题在大卡片底部 (同灵动通知)
-        UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, cw - 32, 24)];
+        UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, b.w - 32, 24)];
         [tt setText:@"自定义样式设置"];
         [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
         [card addSubview:tt];
