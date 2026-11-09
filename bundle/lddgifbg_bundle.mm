@@ -140,6 +140,7 @@ static id CLSSTR(const char *n) { return (id)objc_getClass(n); }
 @end
 @interface NSIndexPath : NSObject
 - (NSInteger)row;
+- (NSInteger)section;
 @end
 @interface NSException : NSObject @end
 @interface NSCharacterSet : NSObject
