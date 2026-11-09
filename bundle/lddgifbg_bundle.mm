@@ -1747,6 +1747,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 2 ? 96.0 : 14.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
 - (NSInteger)tableView:(id)tv titleAlignmentForFooterInSection:(NSInteger)s { return 0; }
+// 1.88: 同坑的分区头版 —— 新增分区后 PSListController 按分区号取头标题越界闪退, 覆盖阻断
+- (NSInteger)tableView:(id)tv titleAlignmentForHeaderInSection:(NSInteger)s { return 0; }
 // 1.87: 分区头视图 —— 灰色居中标题 (卡片外)
 - (id)tableView:(id)tv viewForHeaderInSection:(NSInteger)s {
     if (s != 1) return nil;
@@ -1781,7 +1783,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.87";
+    NSString *ver = @"1.88";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
