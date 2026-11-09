@@ -1671,6 +1671,27 @@ static UILabel *gRandLabel = nil;
     if (tb) { [tb reloadData]; LogB("PREVIEW-RELOAD-OK"); }
     else LogB("PREVIEW-RELOAD-NO-TABLE");
 }
+// 1.93: 防右伸 —— 样式选择列首建时若拿到过渡宽度(约490), 布局定稿后发现列宽与
+// 真实行宽算出的期望值差超 2pt, 就 reloadData 一次按真实宽重建 (掩码只摊位置, 尺寸须重建)
+static int gSelRebuild = 0;
+- (void)viewDidLayoutSubviews {
+    @try { [super viewDidLayoutSubviews]; } @catch (id e) { }
+    @try {
+        if (!gSelRebuild) {
+            id col = (UIView *)[[self view] viewWithTag:4000];
+            if (col) {
+                double realW = ((CGRect(*)(id, SEL))objc_msgSend)((id)[col superview], sel_registerName("bounds")).w;
+                double wantW = ((CGRect(*)(id, SEL))objc_msgSend)(col, sel_registerName("bounds")).w;
+                if (realW > 100.0 && (wantW - (realW - 34.0) / 4.0) > 2.0) gSelRebuild = 1;
+            }
+        }
+        if (gSelRebuild) {
+            gSelRebuild = 0;
+            id tb = [self table];
+            if (tb) [tb reloadData];
+        }
+    } @catch (id e) { gSelRebuild = 0; }
+}
 - (id)specifiers {
     @try { return [self loadSpecifiersFromPlistName:@"Root" target:self]; }
     @catch (id e) { LogB("ROOT-SPEC-EXC"); }
@@ -1784,7 +1805,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.92";
+    NSString *ver = @"1.93";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1838,6 +1859,9 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         for (int i = 0; i < 4; i++) {
             double cx = 8.0 + i * (tw + 6.0);
             UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 7, tw, 118)];
+            // 1.93: 防右伸 —— 首建宽度若是过渡值, cell 定宽时按比例自动摊开
+            [col setAutoresizingMask:5];
+            [col setTag:4000];
             [col setUserInteractionEnabled:YES];
             UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(styleTapped:)];
             objc_setAssociatedObject(tg, &kLDDStyleKey, [NSNumber numberWithDouble:(double)i], 1);
@@ -1857,49 +1881,49 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [[blob layer] setCornerRadius:28.0];
             [th addSubview:blob];
             // 岛形药丸 (四种样式不同大小, 宽度随缩略图自适应)
-            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(3, 3, tw - 6, 26) : (i == 1 ? MakeRect(7, 3, tw - 14, 22) : (i == 2 ? MakeRect(12, 3, tw - 24, 18) : MakeRect(16, 3, tw - 32, 14))))];
+            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(3, 3, tw - 6, 20) : (i == 1 ? MakeRect(7, 3, tw - 14, 17) : (i == 2 ? MakeRect(12, 3, tw - 24, 15) : MakeRect(16, 3, tw - 44, 12))))];
             [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
             CGRect pfr = [pill frame];
             [[pill layer] setCornerRadius:pfr.h / 2.0];
             [th addSubview:pill];
             if (i == 0) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(4, 6, 14, 14)];
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(4, 3, 14, 14)];
                 [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
                 [[ic layer] setCornerRadius:4.0];
                 [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(22, 8, pfr.w - 28, 4)];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(22, 5, pfr.w - 28, 4)];
                 [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
                 [[l1 layer] setCornerRadius:2.0];
                 [pill addSubview:l1];
-                UIView *l2 = [[UIView alloc] initWithFrame:MakeRect(22, 15, pfr.w - 34, 4)];
+                UIView *l2 = [[UIView alloc] initWithFrame:MakeRect(22, 12, pfr.w - 34, 4)];
                 [l2 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.5]];
                 [[l2 layer] setCornerRadius:2.0];
                 [pill addSubview:l2];
             } else if (i == 1) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(3, 4, 13, 13)];
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(3, 2, 13, 13)];
                 [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
                 [[ic layer] setCornerRadius:3.0];
                 [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(19, 9, pfr.w - 25, 4)];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(19, 6, pfr.w - 25, 4)];
                 [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
                 [[l1 layer] setCornerRadius:2.0];
                 [pill addSubview:l1];
             } else if (i == 2) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(2, 3, 12, 12)];
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(2, 2, 11, 11)];
                 [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
                 [[ic layer] setCornerRadius:3.0];
                 [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(16, 7, pfr.w - 22, 4)];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(16, 5, pfr.w - 22, 4)];
                 [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
                 [[l1 layer] setCornerRadius:2.0];
                 [pill addSubview:l1];
             } else {
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(4, 5, pfr.w - 8, 4)];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(4, 4, pfr.w - 8, 4)];
                 [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
                 [[l1 layer] setCornerRadius:2.0];
                 [pill addSubview:l1];
                 // 自定义: 右侧小圆点 (同灵动通知)
-                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 12, 5, 9, 9)];
+                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 28, 4, 9, 9)];
                 [dot setBackgroundColor:[UIColor colorWithWhite:0.55 alpha:1.0]];
                 [[dot layer] setCornerRadius:4.5];
                 [th addSubview:dot];
@@ -1930,6 +1954,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         }
         // 1.90: 自定义样式设置标题 (页面直排, 同灵动通知)
         UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, b.w - 32, 24)];
+        [tt setAutoresizingMask:2];
         [tt setText:@"自定义样式设置"];
         [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
         [[cell contentView] addSubview:tt];
@@ -1938,6 +1963,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     if (sec == 2) {
         // 1.86: 四种样式说明 (灰字, 无卡片)
         UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 0, b.w - 24, 96)];
+        [ds setAutoresizingMask:2];
         [ds setNumberOfLines:0];
         [ds setText:@"四种样式:\n1.图标+时间+APP名称+标题+双行内容(不滚动显示)\n2.图标+时间+APP名称+标题+单行内容(滚动显示)\n3.图标+时间+APP名称+标题+内容(同行滚动显示)\n4.以标准样式为基础，自定义图标、时间、标题、APP名称、副标题和内容"];
         [ds setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
