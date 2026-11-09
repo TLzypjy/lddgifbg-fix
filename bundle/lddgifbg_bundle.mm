@@ -1494,130 +1494,6 @@ static void LDDNotifyMatChanged(void) {
 - (NSInteger)numberOfSectionsInTableView:(id)tv;
 - (NSInteger)tableView:(id)tv numberOfRowsInSection:(NSInteger)s;
 - (id)tableView:(id)tv cellForRowAtIndexPath:(id)ip;
-// 1.98: style selector content drawn in willDisplay - cell already sized to final width here,
-// width-timing races are gone at the root (this is how mature tweaks like DN avoid stretching)
-- (void)tableView:(id)tv willDisplayCell:(id)cell forRowAtIndexPath:(id)ip {
-    if ([ip section] != 1) return;
-    @try {
-        // 1.87: 复刻灵动通知排版 —— 灰标题在分区头(卡片外); 大白卡: 缩略图(黑描边)+名字+单选圈+间隔+自定义样式设置标题
-        [cell setSelectionStyle:0];
-        // 1.90: 去掉白卡片 —— 内容直接坐在页面背景上 (同灵动通知, 消除两层背景感)
-        double cw = [[cell contentView] bounds].w;
-        if (cw < 100) cw = sGoodCellW;
-        if (cw < 100) return;
-        CGRect b = MakeRect(0, 0, cw, 214);
-        // 1.97: 缩略图改固定尺寸 —— 与建行宽度彻底脱钩, 首建拿到过渡宽度也不会再伸缩
-        double tw = 68.0;
-        double thh = 66.0;
-        NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
-        id sv2 = [ud2 objectForKey:@"lddgifbgNotifStyle"];
-        long cur = sv2 ? (long)[sv2 doubleValue] : 0;
-        for (int i = 0; i < 4; i++) {
-            double total = 4.0 * tw + 18.0;
-            double cx = (cw - total) / 2.0 + i * (tw + 6.0);
-            if (cx < 2.0) cx = 2.0;
-            UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 7, tw, 118)];
-            // 1.93: 防右伸 —— 首建宽度若是过渡值, cell 定宽时按比例自动摊开
-            [col setAutoresizingMask:5];
-            [col setTag:4000];
-            [col setUserInteractionEnabled:YES];
-            UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(styleTapped:)];
-            objc_setAssociatedObject(tg, &kLDDStyleKey, [NSNumber numberWithDouble:(double)i], 1);
-            [col addGestureRecognizer:tg];
-            [[cell contentView] addSubview:col];
-            // 缩略图: 浅绿底 + 绿色圆(壁纸示意) + 黑描边 (同灵动通知)
-            UIView *th = [[UIView alloc] initWithFrame:MakeRect(0, 0, tw, thh)];
-            // 1.89: 缩略图透明底 (避免白卡上再叠一层底色的双层背景感), 只留黑描边+绿圆+药丸
-            [th setBackgroundColor:[UIColor clearColor]];
-            [[th layer] setCornerRadius:12.0];
-            [[th layer] setBorderWidth:2.0];
-            [[th layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.12 alpha:1.0] CGColor]];
-            [th setClipsToBounds:YES];
-            [col addSubview:th];
-            UIView *blob = [[UIView alloc] initWithFrame:MakeRect((tw - 56.0) / 2.0, thh - 28.0, 56, 56)];
-            [blob setBackgroundColor:[UIColor colorWithRed:0.60 green:0.78 blue:0.52 alpha:1.0]];
-            [[blob layer] setCornerRadius:28.0];
-            [th addSubview:blob];
-            // 岛形药丸 (四种样式不同大小, 宽度随缩略图自适应)
-            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(3, 3, tw - 6, 20) : (i == 1 ? MakeRect(7, 3, tw - 14, 17) : (i == 2 ? MakeRect(12, 3, tw - 24, 15) : MakeRect(16, 3, tw - 44, 12))))];
-            [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
-            CGRect pfr = [pill frame];
-            [[pill layer] setCornerRadius:pfr.h / 2.0];
-            [th addSubview:pill];
-            if (i == 0) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(4, 3, 14, 14)];
-                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
-                [[ic layer] setCornerRadius:4.0];
-                [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(22, 5, pfr.w - 28, 4)];
-                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
-                [[l1 layer] setCornerRadius:2.0];
-                [pill addSubview:l1];
-                UIView *l2 = [[UIView alloc] initWithFrame:MakeRect(22, 12, pfr.w - 34, 4)];
-                [l2 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.5]];
-                [[l2 layer] setCornerRadius:2.0];
-                [pill addSubview:l2];
-            } else if (i == 1) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(3, 2, 13, 13)];
-                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
-                [[ic layer] setCornerRadius:3.0];
-                [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(19, 6, pfr.w - 25, 4)];
-                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
-                [[l1 layer] setCornerRadius:2.0];
-                [pill addSubview:l1];
-            } else if (i == 2) {
-                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(2, 2, 11, 11)];
-                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
-                [[ic layer] setCornerRadius:3.0];
-                [pill addSubview:ic];
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(16, 5, pfr.w - 22, 4)];
-                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
-                [[l1 layer] setCornerRadius:2.0];
-                [pill addSubview:l1];
-            } else {
-                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(4, 4, pfr.w - 8, 4)];
-                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
-                [[l1 layer] setCornerRadius:2.0];
-                [pill addSubview:l1];
-                // 自定义: 右侧小圆点 (同灵动通知)
-                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 28, 4, 9, 9)];
-                [dot setBackgroundColor:[UIColor colorWithWhite:0.55 alpha:1.0]];
-                [[dot layer] setCornerRadius:4.5];
-                [th addSubview:dot];
-            }
-            // 名字
-            UILabel *nm = [[UILabel alloc] initWithFrame:MakeRect(0, thh + 6, tw, 16)];
-            [nm setText:(i == 0 ? @"标准" : (i == 1 ? @"紧凑" : (i == 2 ? @"迷你" : @"自定义")))];
-            [nm setTextAlignment:1];
-            [nm setFont:[UIFont boldSystemFontOfSize:13.0]];
-            [col addSubview:nm];
-            // 单选圈 (选中=蓝底白勾, 未选=白底蓝圈)
-            UIView *rd = [[UIView alloc] initWithFrame:MakeRect((tw - 22.0) / 2.0, thh + 28, 22, 22)];
-            [[rd layer] setCornerRadius:11.0];
-            if (cur == i) {
-                [rd setBackgroundColor:[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0]];
-                UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 22, 22)];
-                [ck setText:@"✓"];
-                [ck setTextColor:[UIColor whiteColor]];
-                [ck setTextAlignment:1];
-                [ck setFont:[UIFont boldSystemFontOfSize:14.0]];
-                [rd addSubview:ck];
-            } else {
-                [rd setBackgroundColor:[UIColor whiteColor]];
-                [[rd layer] setBorderWidth:1.5];
-                [[rd layer] setBorderColor:(CGColorRef)[[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0] CGColor]];
-            }
-            [col addSubview:rd];
-        }
-        // 1.90: 自定义样式设置标题 (页面直排, 同灵动通知)
-        UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, b.w - 32, 24)];
-        [tt setAutoresizingMask:2];
-        [tt setText:@"自定义样式设置"];
-        [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
-        [[cell contentView] addSubview:tt];
-    } @catch (id e) { }
-}
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip;
 // 1.9.153: 点击数值弹出输入框
 - (void)valTapped:(UITapGestureRecognizer *)g;
@@ -2212,6 +2088,130 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [cell setSelectionStyle:1];
     }
     return cell;
+}
+// 1.98: style selector content drawn in willDisplay - cell already sized to final width here,
+// width-timing races are gone at the root (this is how mature tweaks like DN avoid stretching)
+- (void)tableView:(id)tv willDisplayCell:(id)cell forRowAtIndexPath:(id)ip {
+    if ([ip section] != 1) return;
+    @try {
+        // 1.87: 复刻灵动通知排版 —— 灰标题在分区头(卡片外); 大白卡: 缩略图(黑描边)+名字+单选圈+间隔+自定义样式设置标题
+        [cell setSelectionStyle:0];
+        // 1.90: 去掉白卡片 —— 内容直接坐在页面背景上 (同灵动通知, 消除两层背景感)
+        double cw = [[cell contentView] bounds].w;
+        if (cw < 100) cw = sGoodCellW;
+        if (cw < 100) return;
+        CGRect b = MakeRect(0, 0, cw, 214);
+        // 1.97: 缩略图改固定尺寸 —— 与建行宽度彻底脱钩, 首建拿到过渡宽度也不会再伸缩
+        double tw = 68.0;
+        double thh = 66.0;
+        NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
+        id sv2 = [ud2 objectForKey:@"lddgifbgNotifStyle"];
+        long cur = sv2 ? (long)[sv2 doubleValue] : 0;
+        for (int i = 0; i < 4; i++) {
+            double total = 4.0 * tw + 18.0;
+            double cx = (cw - total) / 2.0 + i * (tw + 6.0);
+            if (cx < 2.0) cx = 2.0;
+            UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 7, tw, 118)];
+            // 1.93: 防右伸 —— 首建宽度若是过渡值, cell 定宽时按比例自动摊开
+            [col setAutoresizingMask:5];
+            [col setTag:4000];
+            [col setUserInteractionEnabled:YES];
+            UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(styleTapped:)];
+            objc_setAssociatedObject(tg, &kLDDStyleKey, [NSNumber numberWithDouble:(double)i], 1);
+            [col addGestureRecognizer:tg];
+            [[cell contentView] addSubview:col];
+            // 缩略图: 浅绿底 + 绿色圆(壁纸示意) + 黑描边 (同灵动通知)
+            UIView *th = [[UIView alloc] initWithFrame:MakeRect(0, 0, tw, thh)];
+            // 1.89: 缩略图透明底 (避免白卡上再叠一层底色的双层背景感), 只留黑描边+绿圆+药丸
+            [th setBackgroundColor:[UIColor clearColor]];
+            [[th layer] setCornerRadius:12.0];
+            [[th layer] setBorderWidth:2.0];
+            [[th layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.12 alpha:1.0] CGColor]];
+            [th setClipsToBounds:YES];
+            [col addSubview:th];
+            UIView *blob = [[UIView alloc] initWithFrame:MakeRect((tw - 56.0) / 2.0, thh - 28.0, 56, 56)];
+            [blob setBackgroundColor:[UIColor colorWithRed:0.60 green:0.78 blue:0.52 alpha:1.0]];
+            [[blob layer] setCornerRadius:28.0];
+            [th addSubview:blob];
+            // 岛形药丸 (四种样式不同大小, 宽度随缩略图自适应)
+            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(3, 3, tw - 6, 20) : (i == 1 ? MakeRect(7, 3, tw - 14, 17) : (i == 2 ? MakeRect(12, 3, tw - 24, 15) : MakeRect(16, 3, tw - 44, 12))))];
+            [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
+            CGRect pfr = [pill frame];
+            [[pill layer] setCornerRadius:pfr.h / 2.0];
+            [th addSubview:pill];
+            if (i == 0) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(4, 3, 14, 14)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:4.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(22, 5, pfr.w - 28, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+                UIView *l2 = [[UIView alloc] initWithFrame:MakeRect(22, 12, pfr.w - 34, 4)];
+                [l2 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.5]];
+                [[l2 layer] setCornerRadius:2.0];
+                [pill addSubview:l2];
+            } else if (i == 1) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(3, 2, 13, 13)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:3.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(19, 6, pfr.w - 25, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+            } else if (i == 2) {
+                UIView *ic = [[UIView alloc] initWithFrame:MakeRect(2, 2, 11, 11)];
+                [ic setBackgroundColor:[UIColor colorWithWhite:0.75 alpha:1.0]];
+                [[ic layer] setCornerRadius:3.0];
+                [pill addSubview:ic];
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(16, 5, pfr.w - 22, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+            } else {
+                UIView *l1 = [[UIView alloc] initWithFrame:MakeRect(4, 4, pfr.w - 8, 4)];
+                [l1 setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.9]];
+                [[l1 layer] setCornerRadius:2.0];
+                [pill addSubview:l1];
+                // 自定义: 右侧小圆点 (同灵动通知)
+                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 28, 4, 9, 9)];
+                [dot setBackgroundColor:[UIColor colorWithWhite:0.55 alpha:1.0]];
+                [[dot layer] setCornerRadius:4.5];
+                [th addSubview:dot];
+            }
+            // 名字
+            UILabel *nm = [[UILabel alloc] initWithFrame:MakeRect(0, thh + 6, tw, 16)];
+            [nm setText:(i == 0 ? @"标准" : (i == 1 ? @"紧凑" : (i == 2 ? @"迷你" : @"自定义")))];
+            [nm setTextAlignment:1];
+            [nm setFont:[UIFont boldSystemFontOfSize:13.0]];
+            [col addSubview:nm];
+            // 单选圈 (选中=蓝底白勾, 未选=白底蓝圈)
+            UIView *rd = [[UIView alloc] initWithFrame:MakeRect((tw - 22.0) / 2.0, thh + 28, 22, 22)];
+            [[rd layer] setCornerRadius:11.0];
+            if (cur == i) {
+                [rd setBackgroundColor:[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0]];
+                UILabel *ck = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 22, 22)];
+                [ck setText:@"✓"];
+                [ck setTextColor:[UIColor whiteColor]];
+                [ck setTextAlignment:1];
+                [ck setFont:[UIFont boldSystemFontOfSize:14.0]];
+                [rd addSubview:ck];
+            } else {
+                [rd setBackgroundColor:[UIColor whiteColor]];
+                [[rd layer] setBorderWidth:1.5];
+                [[rd layer] setBorderColor:(CGColorRef)[[UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0] CGColor]];
+            }
+            [col addSubview:rd];
+        }
+        // 1.90: 自定义样式设置标题 (页面直排, 同灵动通知)
+        UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, b.w - 32, 24)];
+        [tt setAutoresizingMask:2];
+        [tt setText:@"自定义样式设置"];
+        [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
+        [[cell contentView] addSubview:tt];
+    } @catch (id e) { }
 }
 - (void)tableView:(id)tv didSelectRowAtIndexPath:(id)ip {
     NSInteger row = [ip row];
