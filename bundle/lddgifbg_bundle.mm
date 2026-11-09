@@ -1805,7 +1805,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.93";
+    NSString *ver = @"1.94";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1839,6 +1839,18 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     // 实际宽), 按它建行后 cell 不再变宽, 内容整体溢出屏幕右侧。
     // 伸缩的根治靠 autoresizing: cell 首次定宽/变宽时所有子视图自动跟随, 不再依赖刷新时机。
     double cbw = [[cell contentView] bounds].w;
+    if (cbw < 100) {
+        // 1.94: 新 cell 首建时 content 尚无宽度 —— 借用屏幕上已布局 cell 的真实宽
+        // (旧兜底用表格 bounds 是过渡值, 样式选择区每次刷新都按错宽重建导致右伸)
+        id vis = ((id(*)(id, SEL))objc_msgSend)(table, sel_registerName("visibleCells"));
+        if (vis) {
+            for (id vc in vis) {
+                if (!vc) continue;
+                double vw = ((CGRect(*)(id, SEL))objc_msgSend)((id)[vc contentView], sel_registerName("bounds")).w;
+                if (vw >= 100.0) { cbw = vw; break; }
+            }
+        }
+    }
     if (cbw < 100) cbw = [tv bounds].w;
     if (cbw < 100) cbw = [[UIScreen mainScreen] bounds].w;
     CGRect b = MakeRect(0, 0, cbw, 52);
