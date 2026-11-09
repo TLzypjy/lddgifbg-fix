@@ -1928,11 +1928,11 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             }
             [col addSubview:rd];
         }
-        // 1.87: 自定义样式设置标题在大卡片底部 (同灵动通知)
+        // 1.90: 自定义样式设置标题 (页面直排, 同灵动通知)
         UILabel *tt = [[UILabel alloc] initWithFrame:MakeRect(16, 166, b.w - 32, 24)];
         [tt setText:@"自定义样式设置"];
         [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
-        [card addSubview:tt];
+        [[cell contentView] addSubview:tt];
         return cell;
     }
     if (sec == 2) {
