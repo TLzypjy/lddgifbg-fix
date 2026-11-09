@@ -1512,6 +1512,8 @@ static void LDDNotifyMatChanged(void) {
 static const char kLDDRandOptKey = 0;
 // 1.86: 通知窗口样式选择手势的序号关联
 static const char kLDDStyleKey = 0;
+// 1.97: 好宽度缓存 (预览图已改固定尺寸, 仅标题/说明的宽度微调还引用它, 保留无害)
+static double sGoodCellW = 0;
 
 @implementation lddgifbgRootListController
 // 1.72: 关闭随机弹层(弹层挂在窗口层, 从 keyWindow 找)
@@ -1671,33 +1673,6 @@ static UILabel *gRandLabel = nil;
     if (tb) { [tb reloadData]; LogB("PREVIEW-RELOAD-OK"); }
     else LogB("PREVIEW-RELOAD-NO-TABLE");
 }
-// 1.93: 防右伸 —— 样式选择列首建时若拿到过渡宽度(约490), 布局定稿后发现列宽与
-// 真实行宽算出的期望值差超 2pt, 就 reloadData 一次按真实宽重建 (掩码只摊位置, 尺寸须重建)
-static int gSelRebuild = 0;
-// 1.95: 缓存最近一次确认正确的建行宽度 —— 静态存活跨页面, 推入转场中首建直接用真实宽
-static double sGoodCellW = 0;
-- (void)viewDidLayoutSubviews {
-    @try { [super viewDidLayoutSubviews]; } @catch (id e) { }
-    @try {
-        if (!gSelRebuild) {
-            id col = (UIView *)[[self view] viewWithTag:4000];
-            if (col) {
-                double realW = ((CGRect(*)(id, SEL))objc_msgSend)((id)[col superview], sel_registerName("bounds")).w;
-                double wantW = ((CGRect(*)(id, SEL))objc_msgSend)(col, sel_registerName("bounds")).w;
-                if (realW > 100.0) {
-                    double expW = (realW - 34.0) / 4.0;
-                    if (wantW - expW > 2.0 || expW - wantW > 2.0) gSelRebuild = 1;
-                    else sGoodCellW = realW;
-                }
-            }
-        }
-        if (gSelRebuild) {
-            gSelRebuild = 0;
-            id tb = [self table];
-            if (tb) [tb reloadData];
-        }
-    } @catch (id e) { gSelRebuild = 0; }
-}
 - (id)specifiers {
     @try { return [self loadSpecifiersFromPlistName:@"Root" target:self]; }
     @catch (id e) { LogB("ROOT-SPEC-EXC"); }
@@ -1819,7 +1794,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 130, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.96";
+    NSString *ver = @"1.97";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1880,14 +1855,16 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [cell setSelectionStyle:0];
         // 1.90: 去掉白卡片 —— 内容直接坐在页面背景上 (同灵动通知, 消除两层背景感)
         double cw = b.w;
-        // 1.87: 缩略图宽度按实际卡宽动态算 (左右各12边距 + 3个10间距), 永不溢出
-        double tw = (cw - 34.0) / 4.0;
+        // 1.97: 缩略图改固定尺寸 —— 与建行宽度彻底脱钩, 首建拿到过渡宽度也不会再伸缩
+        double tw = 68.0;
         double thh = 66.0;
         NSUserDefaults *ud2 = [[NSUserDefaults alloc] initWithSuiteName:@"lddgifbg"];
         id sv2 = [ud2 objectForKey:@"lddgifbgNotifStyle"];
         long cur = sv2 ? (long)[sv2 doubleValue] : 0;
         for (int i = 0; i < 4; i++) {
-            double cx = 8.0 + i * (tw + 6.0);
+            double total = 4.0 * tw + 18.0;
+            double cx = (cw - total) / 2.0 + i * (tw + 6.0);
+            if (cx < 2.0) cx = 2.0;
             UIView *col = [[UIView alloc] initWithFrame:MakeRect(cx, 7, tw, 118)];
             // 1.93: 防右伸 —— 首建宽度若是过渡值, cell 定宽时按比例自动摊开
             [col setAutoresizingMask:5];
