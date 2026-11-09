@@ -1784,7 +1784,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.90";
+    NSString *ver = @"1.91";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1857,7 +1857,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [[blob layer] setCornerRadius:28.0];
             [th addSubview:blob];
             // 岛形药丸 (四种样式不同大小, 宽度随缩略图自适应)
-            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(4, 0, tw - 8, 26) : (i == 1 ? MakeRect(9, 0, tw - 18, 22) : (i == 2 ? MakeRect(15, 0, tw - 30, 18) : MakeRect(20, 0, tw - 40, 14))))];
+            UIView *pill = [[UIView alloc] initWithFrame:(i == 0 ? MakeRect(4, -2, tw - 8, 28) : (i == 1 ? MakeRect(9, -2, tw - 18, 24) : (i == 2 ? MakeRect(15, -2, tw - 30, 20) : MakeRect(20, -2, tw - 40, 16))))];
             [pill setBackgroundColor:[UIColor colorWithWhite:0.07 alpha:1.0]];
             CGRect pfr = [pill frame];
             [[pill layer] setCornerRadius:pfr.h / 2.0];
@@ -1899,7 +1899,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
                 [[l1 layer] setCornerRadius:2.0];
                 [pill addSubview:l1];
                 // 自定义: 右侧小圆点 (同灵动通知)
-                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 15, 20, 9, 9)];
+                UIView *dot = [[UIView alloc] initWithFrame:MakeRect(tw - 15, 2, 9, 9)];
                 [dot setBackgroundColor:[UIColor colorWithWhite:0.55 alpha:1.0]];
                 [[dot layer] setCornerRadius:4.5];
                 [th addSubview:dot];
