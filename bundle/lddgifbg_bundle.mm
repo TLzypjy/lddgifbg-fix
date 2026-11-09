@@ -1724,7 +1724,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     // 1.87: 新分区行高 (1=样式选择大卡 214 / 2=说明文字 118)
     if ([ip section] == 1) return 214.0;
-    if ([ip section] == 2) return 118.0;
+    if ([ip section] == 2) return 100.0;
     if ([ip row] == 1) {
         // 1.9.146: 预览行高度贴合预览药丸, 消除上下大面积留白
         CGRect tb = [tv bounds];
@@ -1744,7 +1744,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (double)tableView:(id)tv estimatedHeightForFooterInSection:(NSInteger)s { return 96.0; }
 - (double)tableView:(id)tv heightForHeaderInSection:(NSInteger)s { return s == 1 ? 30.0 : 0.0; }
 // 1.86: 页脚分区化 —— 仅最后一个分区(2)挂作者页脚, 其余分区用窄间距隔开
-- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 2 ? 96.0 : 14.0; }
+- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 2 ? 96.0 : 6.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
 - (NSInteger)tableView:(id)tv titleAlignmentForFooterInSection:(NSInteger)s { return 0; }
 // 1.88: 同坑的分区头版 —— 新增分区后 PSListController 按分区号取头标题越界闪退, 覆盖阻断
@@ -1758,6 +1758,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     UIView *hv = [[UIView alloc] initWithFrame:MakeRect(0, 0, sw, 30)];
     [hv setBackgroundColor:[UIColor clearColor]];
     UILabel *hl = [[UILabel alloc] initWithFrame:MakeRect(0, 4, sw, 22)];
+    [hl setAutoresizingMask:2];
     [hl setText:@"灵动岛通知窗口样式选择"];
     [hl setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
     [hl setTextAlignment:1];
@@ -1783,7 +1784,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.88";
+    NSString *ver = @"1.89";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1851,7 +1852,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             [card addSubview:col];
             // 缩略图: 浅绿底 + 绿色圆(壁纸示意) + 黑描边 (同灵动通知)
             UIView *th = [[UIView alloc] initWithFrame:MakeRect(0, 0, tw, thh)];
-            [th setBackgroundColor:[UIColor colorWithRed:0.93 green:0.95 blue:0.93 alpha:1.0]];
+            // 1.89: 缩略图透明底 (避免白卡上再叠一层底色的双层背景感), 只留黑描边+绿圆+药丸
+            [th setBackgroundColor:[UIColor clearColor]];
             [[th layer] setCornerRadius:12.0];
             [[th layer] setBorderWidth:2.0];
             [[th layer] setBorderColor:(CGColorRef)[[UIColor colorWithWhite:0.12 alpha:1.0] CGColor]];
@@ -1942,7 +1944,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     }
     if (sec == 2) {
         // 1.86: 四种样式说明 (灰字, 无卡片)
-        UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 4, b.w - 24, 110)];
+        UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 0, b.w - 24, 96)];
         [ds setNumberOfLines:0];
         [ds setText:@"四种样式:\n1.图标+时间+APP名称+标题+双行内容(不滚动显示)\n2.图标+时间+APP名称+标题+单行内容(滚动显示)\n3.图标+时间+APP名称+标题+内容(同行滚动显示)\n4.以标准样式为基础，自定义图标、时间、标题、APP名称、副标题和内容"];
         [ds setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
