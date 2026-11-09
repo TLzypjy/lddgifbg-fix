@@ -1819,7 +1819,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     [fv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 130, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.95";
+    NSString *ver = @"1.96";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
@@ -1853,6 +1853,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     // 实际宽), 按它建行后 cell 不再变宽, 内容整体溢出屏幕右侧。
     // 伸缩的根治靠 autoresizing: cell 首次定宽/变宽时所有子视图自动跟随, 不再依赖刷新时机。
     double cbw = [[cell contentView] bounds].w;
+    // 1.96: 复用 cell 的 content 宽度就是表格量好的真实宽, 路过即入缓存
+    if (cbw >= 100.0) sGoodCellW = cbw;
     // 1.95: 优先用上次确认正确的宽度 (推入转场中 visibleCells 可能是空的, 靠它兜住)
     if (cbw < 100 && sGoodCellW > 100.0) cbw = sGoodCellW;
     if (cbw < 100) {
