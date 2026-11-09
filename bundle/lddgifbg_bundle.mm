@@ -1674,6 +1674,8 @@ static UILabel *gRandLabel = nil;
 // 1.93: 防右伸 —— 样式选择列首建时若拿到过渡宽度(约490), 布局定稿后发现列宽与
 // 真实行宽算出的期望值差超 2pt, 就 reloadData 一次按真实宽重建 (掩码只摊位置, 尺寸须重建)
 static int gSelRebuild = 0;
+// 1.95: 缓存最近一次确认正确的建行宽度 —— 静态存活跨页面, 推入转场中首建直接用真实宽
+static double sGoodCellW = 0;
 - (void)viewDidLayoutSubviews {
     @try { [super viewDidLayoutSubviews]; } @catch (id e) { }
     @try {
@@ -1682,7 +1684,11 @@ static int gSelRebuild = 0;
             if (col) {
                 double realW = ((CGRect(*)(id, SEL))objc_msgSend)((id)[col superview], sel_registerName("bounds")).w;
                 double wantW = ((CGRect(*)(id, SEL))objc_msgSend)(col, sel_registerName("bounds")).w;
-                if (realW > 100.0 && (wantW - (realW - 34.0) / 4.0) > 2.0) gSelRebuild = 1;
+                if (realW > 100.0) {
+                    double expW = (realW - 34.0) / 4.0;
+                    if (wantW - expW > 2.0 || expW - wantW > 2.0) gSelRebuild = 1;
+                    else sGoodCellW = realW;
+                }
             }
         }
         if (gSelRebuild) {
@@ -1698,7 +1704,7 @@ static int gSelRebuild = 0;
     return [NSArray array];
 }
 // 1.87: 3 个分区 —— 0=原功能行 1=样式选择大卡(灰标题在分区头/缩略图/单选圈/自定义样式设置标题) 2=样式说明文字
-- (NSInteger)numberOfSectionsInTableView:(id)tv { return 3; }
+- (NSInteger)numberOfSectionsInTableView:(id)tv { return 2; }
 // 1.9.140: 行数 10 (0/1开关 2预览 3水平偏移 4垂直偏移 5速度 6选素材 7跳转 8预览通知 9注销)
 // 1.9.184: 行数 10 (版本/作者 移除, 改底部居中版权 footer)
 // 1.52 自用版: 行数 9 (0开关 1预览 2水平偏移 3垂直偏移 4速度 5选素材 6跳转 7预览通知 8注销)
@@ -1745,7 +1751,6 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 - (double)tableView:(id)tv heightForRowAtIndexPath:(id)ip {
     // 1.87: 新分区行高 (1=样式选择大卡 214 / 2=说明文字 118)
     if ([ip section] == 1) return 214.0;
-    if ([ip section] == 2) return 100.0;
     if ([ip row] == 1) {
         // 1.9.146: 预览行高度贴合预览药丸, 消除上下大面积留白
         CGRect tb = [tv bounds];
@@ -1762,10 +1767,10 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 }
 // 1.87: 分区头 —— 分区1 的灰标题在卡片外 (同灵动通知排版)
 - (double)tableView:(id)tv estimatedHeightForHeaderInSection:(NSInteger)s { return s == 1 ? 30.0 : 0.0; }
-- (double)tableView:(id)tv estimatedHeightForFooterInSection:(NSInteger)s { return 96.0; }
+- (double)tableView:(id)tv estimatedHeightForFooterInSection:(NSInteger)s { return 196.0; }
 - (double)tableView:(id)tv heightForHeaderInSection:(NSInteger)s { return s == 1 ? 30.0 : 0.0; }
 // 1.86: 页脚分区化 —— 仅最后一个分区(2)挂作者页脚, 其余分区用窄间距隔开
-- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 2 ? 96.0 : 6.0; }
+- (double)tableView:(id)tv heightForFooterInSection:(NSInteger)s { return s == 1 ? 196.0 : 6.0; }
 // 1.1: 阻断 PSListController 私有 titleAlignmentForFooterInSection (内部 objectAtIndex 越界 → NSRangeException → 设置闪退)
 - (NSInteger)tableView:(id)tv titleAlignmentForFooterInSection:(NSInteger)s { return 0; }
 // 1.88: 同坑的分区头版 —— 新增分区后 PSListController 按分区号取头标题越界闪退, 覆盖阻断
@@ -1790,29 +1795,38 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
 // 1.9.185: 底部三行版权 footer (作者/版本号/越狱源), 越狱源点击复制
 // 1.87: 仅分区 2 渲染作者页脚, 其余分区返回空(用 14pt 间距隔开各分区)
 - (id)tableView:(id)tv viewForFooterInSection:(NSInteger)s {
-    if (s != 2) return nil;
+    if (s != 1) return nil;
     // 1.4: 全宽 label + textAlignment 居中 (与容器宽度无关, 不会偏), 字号改小
+    // 1.95: 四种样式说明并入本页脚 (不再单独开分区, 贴在样式卡下面), 作者信息接在其后
     CGRect tb = ((CGRect(*)(id, SEL))objc_msgSend)(tv, sel_registerName("bounds"));
     double sw = tb.w;
     if (sw < 100) { CGRect sbb = [[UIScreen mainScreen] bounds]; sw = sbb.w; }
-    UIView *fv = [[UIView alloc] initWithFrame:MakeRect(0, 0, sw, 96)];
-    UILabel *l1 = [[UILabel alloc] initWithFrame:MakeRect(0, 10, sw, 20)];
+    UIView *fv = [[UIView alloc] initWithFrame:MakeRect(0, 0, sw, 196)];
+    UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 0, sw - 24, 92)];
+    [ds setNumberOfLines:0];
+    [ds setText:@"四种样式:\n1.图标+时间+APP名称+标题+双行内容(不滚动显示)\n2.图标+时间+APP名称+标题+单行内容(滚动显示)\n3.图标+时间+APP名称+标题+内容(同行滚动显示)\n4.以标准样式为基础，自定义图标、时间、标题、APP名称、副标题和内容"];
+    [ds setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
+    [ds setTextAlignment:1];
+    [ds setFont:[UIFont systemFontOfSize:12.0]];
+    [ds setAutoresizingMask:2];
+    [fv addSubview:ds];
+    UILabel *l1 = [[UILabel alloc] initWithFrame:MakeRect(0, 104, sw, 20)];
     [l1 setText:@"作者：TL"];
     [l1 setFont:[UIFont systemFontOfSize:13.0]];
     [l1 setTextColor:[UIColor colorWithWhite:0.35 alpha:1.0]];
     [l1 setTextAlignment:1];
     [l1 setAutoresizingMask:98];
     [fv addSubview:l1];
-    UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 36, sw, 18)];
+    UILabel *l2 = [[UILabel alloc] initWithFrame:MakeRect(0, 130, sw, 18)];
     // 1.44: 版本号与 control 同步(Info.plist 为二进制无法随源码递增, 直接用常量, 发版改这里)
-    NSString *ver = @"1.94";
+    NSString *ver = @"1.95";
     [l2 setText:[NSString stringWithFormat:@"版本号：%@", ver]];
     [l2 setFont:[UIFont systemFontOfSize:11.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
     [l2 setTextAlignment:1];
     [l2 setAutoresizingMask:98];
     [fv addSubview:l2];
-    UILabel *l3 = [[UILabel alloc] initWithFrame:MakeRect(0, 60, sw, 18)];
+    UILabel *l3 = [[UILabel alloc] initWithFrame:MakeRect(0, 156, sw, 18)];
     [l3 setText:@"越狱源：https://tlzypjy.github.io/jb-repo/"];
     [l3 setFont:[UIFont systemFontOfSize:10.0]];
     [l3 setTextColor:[UIColor colorWithRed:0.0 green:0.45 blue:1.0 alpha:1.0]];
@@ -1839,6 +1853,8 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
     // 实际宽), 按它建行后 cell 不再变宽, 内容整体溢出屏幕右侧。
     // 伸缩的根治靠 autoresizing: cell 首次定宽/变宽时所有子视图自动跟随, 不再依赖刷新时机。
     double cbw = [[cell contentView] bounds].w;
+    // 1.95: 优先用上次确认正确的宽度 (推入转场中 visibleCells 可能是空的, 靠它兜住)
+    if (cbw < 100 && sGoodCellW > 100.0) cbw = sGoodCellW;
     if (cbw < 100) {
         // 1.94: 新 cell 首建时 content 尚无宽度 —— 借用屏幕上已布局 cell 的真实宽
         // (旧兜底用表格 bounds 是过渡值, 样式选择区每次刷新都按错宽重建导致右伸)
@@ -1847,7 +1863,7 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
             for (id vc in vis) {
                 if (!vc) continue;
                 double vw = ((CGRect(*)(id, SEL))objc_msgSend)((id)[vc contentView], sel_registerName("bounds")).w;
-                if (vw >= 100.0) { cbw = vw; break; }
+                if (vw >= 100.0) { cbw = vw; sGoodCellW = vw; break; }
             }
         }
     }
@@ -1970,18 +1986,6 @@ static void LDDPreviewSize(double bw, double *piw, double *pih) {
         [tt setText:@"自定义样式设置"];
         [tt setFont:[UIFont boldSystemFontOfSize:17.0]];
         [[cell contentView] addSubview:tt];
-        return cell;
-    }
-    if (sec == 2) {
-        // 1.86: 四种样式说明 (灰字, 无卡片)
-        UILabel *ds = [[UILabel alloc] initWithFrame:MakeRect(12, 0, b.w - 24, 96)];
-        [ds setAutoresizingMask:2];
-        [ds setNumberOfLines:0];
-        [ds setText:@"四种样式:\n1.图标+时间+APP名称+标题+双行内容(不滚动显示)\n2.图标+时间+APP名称+标题+单行内容(滚动显示)\n3.图标+时间+APP名称+标题+内容(同行滚动显示)\n4.以标准样式为基础，自定义图标、时间、标题、APP名称、副标题和内容"];
-        [ds setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
-        [ds setTextAlignment:1];
-        [ds setFont:[UIFont systemFontOfSize:12.0]];
-        [[cell contentView] addSubview:ds];
         return cell;
     }
     if (row == 0) {
