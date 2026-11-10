@@ -399,8 +399,7 @@ static int ProbeCountLines(const char *path) {
 static void ProbeWrite(const char *line) {
     // 1.85: 探针日志整体停用(调试结束) —— 岛布局不再写任何文件, 零常驻 IO;
     // 历史日志文件在构造器统一删除。以下原实现保留但不可达, 需要时删掉 return 即可恢复。
-    (void)line;
-    return;
+    // 1.99 probe re-enabled for card development
     // 1.63: 连续重复行去重 —— 稳态下 POS/STREAM/MAT 等探针大量重复, 不再逐条刷盘(降 CPU/发热)
     static char gProbeLast[192] = "";
     if (line && strncmp(line, gProbeLast, sizeof(gProbeLast)) == 0) return;
@@ -1058,6 +1057,32 @@ static void ShowBlock(id self, int colorIsRed) {
 }
 
 // ---------- layoutSubviews hook ----------
+// 1.99: 横幅文字收割器 —— 递归收集容器内 UILabel 的 文字/尺寸/坐标/字号, 通知卡片文字布局的数据源
+static void LDDHarvestLabels(id v, int depth) {
+    if (!v || depth > 12) return;
+    @try {
+        id subs = ((id(*)(id, SEL))objc_msgSend)(v, sel_registerName("subviews"));
+        if (!subs) return;
+        for (id s in subs) {
+            @try {
+                Class cls = ((Class(*)(id, SEL))objc_msgSend)(s, sel_registerName("class"));
+                const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
+                if (cn && strstr(cn, "UILabel")) {
+                    id txt = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("text"));
+                    CGRect f = ((CGRect(*)(id, SEL))objc_msgSend)(s, sel_registerName("frame"));
+                    id fnt = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("font"));
+                    double psz = fnt ? ((double(*)(id, SEL))objc_msgSend)(fnt, sel_registerName("pointSize")) : 0.0;
+                    const char *cs = txt ? ((const char *(*)(id, SEL))objc_msgSend)(txt, sel_registerName("UTF8String")) : (const char *)0;
+                    char lb[320];
+                    if (cs && cs[0]) snprintf(lb, sizeof(lb), "LBL d%d %.0fx%.0f@%.0f,%.0f f%.1f [%s]", depth, f.w, f.h, f.ox, f.oy, psz, cs);
+                    else snprintf(lb, sizeof(lb), "LBL d%d %.0fx%.0f@%.0f,%.0f f%.1f [nil]", depth, f.w, f.h, f.ox, f.oy, psz);
+                    ProbeWrite(lb);
+                }
+                LDDHarvestLabels(s, depth + 1);
+            } @catch (id e) { }
+        }
+    } @catch (id e) { }
+}
 static void LDDIslandLayout(id self) {
     static int first = 0;
     if (!first) { first = 1; ProbeWrite("ISLAND-LAYOUT-ENTERED"); }
@@ -1212,6 +1237,36 @@ static void LDDIslandLayout(id self) {
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
                 if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
+                // 1.99: 横幅收割 —— 2.5s 冷却, 抓 UILabel 文字坐标 + 带文字的视图树 (卡片开发数据)
+                static time_t gHavLast = 0;
+                if (time(0) - gHavLast >= 2) {
+                    gHavLast = time(0);
+                    @try {
+                        ProbeWrite("HAV-BEGIN");
+                        LDDHarvestLabels(supvB, 0);
+                        ProbeWrite("HAV-END");
+                        NSString *tree = (NSString *)((id(*)(id, SEL))objc_msgSend)(supvB, sel_registerName("recursiveDescription"));
+                        const char *cs = tree ? ((const char *(*)(id, SEL))objc_msgSend)(tree, sel_registerName("UTF8String")) : (const char *)0;
+                        if (cs && cs[0]) {
+                            ProbeWrite("TREE-BEGIN");
+                            const char *p = cs;
+                            int tln = 0;
+                            while (p && p[0] && tln < 300) {
+                                const char *e = strchr(p, '\n');
+                                size_t len = e ? (size_t)(e - p) : strlen(p);
+                                if (len > 180) len = 180;
+                                char tbuf[192];
+                                memcpy(tbuf, p, len);
+                                tbuf[len] = 0;
+                                ProbeWrite(tbuf);
+                                tln++;
+                                if (!e) break;
+                                p = e + 1;
+                            }
+                            ProbeWrite("TREE-END");
+                        }
+                    } @catch (id e) { ProbeWrite("HAV-EXC"); }
+                }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
@@ -1801,12 +1856,11 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.98");
+    ProbeWrite("LDD-BUILD v1.99");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
     unlink("/var/mobile/lddgifbg/__island_size__");
-    unlink("/var/mobile/lddgifbg/__plugin_probe__.txt");
     unlink("/var/mobile/lddgifbg/__force_preview__.consumed");
     // 1.9.151: 构造器不再读 prefs (避免 SpringBoard 启动早期触发 CFPrefs 初始化时序问题)
     // 对照组 hook (兼启动延迟器)
