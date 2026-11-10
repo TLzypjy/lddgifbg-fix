@@ -38,13 +38,9 @@ extern "C" void MSHookMessageEx(Class _class, SEL _sel, IMP _replacement, IMP *_
 extern "C" int objc_getClassList(void *buffer, int bufferLen);
 extern "C" const char *class_getName(void *cls);
 // 2.00: 通知内容模型探针 (presentable ivar 树转储)
-extern "C" void *class_copyIvarList(void *cls, unsigned int *count);
 extern "C" const char *ivar_getName(void *iv);
 extern "C" const char *ivar_getTypeEncoding(void *iv);
 extern "C" id object_getIvar(id obj, void *iv);
-extern "C" void *class_copyMethodList(void *cls, unsigned int *count);
-extern "C" SEL method_getName(void *m);
-extern "C" const char *sel_getName(SEL s);
 extern "C" void *class_copyMethodList(Class cls, unsigned int *count);
 extern "C" void *method_getName(void *method);
 extern "C" const char *method_getTypeEncoding(void *method);
@@ -921,7 +917,7 @@ static void LDDDumpObj(id obj, int depth, const char *tag) {
         ProbeWrite(hd);
         gDumpBudget--;
         unsigned int cnt = 0;
-        void *ivs = class_copyIvarList((__bridge void *)cls, &cnt);
+        void *ivs = class_copyIvarList((Class)cls, &cnt);
         if (ivs) {
             for (unsigned int i = 0; i < cnt && gDumpBudget > 0; i++) {
                 void *iv = ((void **)ivs)[i];
@@ -956,7 +952,7 @@ static void LDDDumpObj(id obj, int depth, const char *tag) {
         }
         if (depth == 0) {
             unsigned int mcnt = 0;
-            void *ms = class_copyMethodList((__bridge void *)cls, &mcnt);
+            void *ms = class_copyMethodList((Class)cls, &mcnt);
             if (ms) {
                 for (unsigned int i = 0; i < mcnt && gDumpBudget > 0; i++) {
                     void *mth = ((void **)ms)[i];
