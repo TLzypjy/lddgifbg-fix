@@ -51,6 +51,7 @@ extern "C" void CFRelease(void *cf);
 extern "C" const char *object_getClassName(id obj);
 extern "C" id object_getClass(id obj);
 extern "C" void dispatch_async(void *queue, void (^block)(void));
+extern "C" void *dispatch_get_global_queue(long identifier, unsigned long flags);
 extern "C" void dispatch_after(long long when, void *queue, void (^block)(void));
 extern "C" int notify_post(const char *name);
 extern "C" int notify_register_dispatch(const char *name, int *token, void *queue, void (^block)(int token));
@@ -968,16 +969,21 @@ static void LDDDumpObj(id obj, int depth, const char *tag) {
         }
     } @catch (id e) { ProbeWrite("DMP-EXC"); }
 }
-// 2.01: bulletin 钩子 (通知内容模型 —— 十年成熟钩点, bulletin 对象自带标题/正文/app名)
+// 2.03: bulletin 钩子 (通知内容模型 —— 十年成熟钩点, bulletin 对象自带标题/正文/app名)
+// 2.03: 转储挪后台线程 —— dump 里的消息发送可能触发别的类 +initialize (内部同步读 cfprefsd),
+// 在主线程上跑会卡死主线程被看门狗杀进安全模式 (v2.02 实锤); 后台线程随便等, 主线程只留原调用
 static void (*origBBSObserver)(id, SEL, id, id, id, BOOL, id);
 static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, id feed, BOOL pls, id reply) {
-    @try {
-        gDumpBudget = 120;
-        ProbeWrite("BB-HIT");
-        LDDDumpObj(bulletin, 0, "bulletin");
-        LDDDumpObj(feed, 1, "feed");
-    } @catch (id e) { }
-    if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
+    id bl = bulletin, fd = feed;
+    if (origBBSObserver) origBBSObserver(self, _cmd, observer, bl, fd, pls, reply);
+    dispatch_after(dispatch_time(0, (int64_t)(1.0 * 1000000000LL)), dispatch_get_global_queue(0, 0), ^{
+        @try {
+            gDumpBudget = 120;
+            ProbeWrite("BB-HIT");
+            LDDDumpObj(bl, 0, "bulletin");
+            LDDDumpObj(fd, 1, "feed");
+        } @catch (id e) { }
+    });
 }
 // 1.52 自用版: 1.50/1.51 移植自灵动通知的 4 个钩子(尺寸回调+收起链三钩)已全部移除 ——
 // 尺寸回调呈现路径从不调用(样式无效), 收起链钩子在延迟代收嵌套时 ARC retain 垃圾指针
@@ -1936,7 +1942,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.02");
+    ProbeWrite("LDD-BUILD v2.03");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
