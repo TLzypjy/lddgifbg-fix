@@ -968,16 +968,16 @@ static void LDDDumpObj(id obj, int depth, const char *tag) {
         }
     } @catch (id e) { ProbeWrite("DMP-EXC"); }
 }
-static void (*origBMPresent)(id, SEL, id, id, id, void *);
-static void hookBMPresent(id self, SEL _cmd, id presentable, id options, id userInfo, void *err) {
+// 2.01: bulletin 钩子 (通知内容模型 —— 十年成熟钩点, bulletin 对象自带标题/正文/app名)
+static void (*origBBSObserver)(id, SEL, id, id, id, BOOL, id);
+static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, id feed, BOOL pls, id reply) {
     @try {
-        gDumpBudget = 150;
-        ProbeWrite("BMP-HIT");
-        LDDDumpObj(presentable, 0, "presentable");
-        LDDDumpObj(options, 1, "options");
-        LDDDumpObj(userInfo, 1, "userInfo");
+        gDumpBudget = 120;
+        ProbeWrite("BB-HIT");
+        LDDDumpObj(bulletin, 0, "bulletin");
+        LDDDumpObj(feed, 1, "feed");
     } @catch (id e) { }
-    if (origBMPresent) origBMPresent(self, _cmd, presentable, options, userInfo, err);
+    if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
 }
 // 1.52 自用版: 1.50/1.51 移植自灵动通知的 4 个钩子(尺寸回调+收起链三钩)已全部移除 ——
 // 尺寸回调呈现路径从不调用(样式无效), 收起链钩子在延迟代收嵌套时 ARC retain 垃圾指针
@@ -1936,7 +1936,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.00");
+    ProbeWrite("LDD-BUILD v2.01");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
@@ -1962,11 +1962,11 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
-    // 2.00: 通知内容模型探针钩子 (SBBannerManager postPresentable)
-    id clsBM = objc_getClass("SBBannerManager");
-    if (clsBM) {
-        MSHookMessageEx((Class)clsBM, sel_registerName("postPresentable:withOptions:userInfo:error:"), (IMP)hookBMPresent, (IMP *)&origBMPresent);
-        ProbeWrite("BMP-HOOK");
+    // 2.01: 通知内容钩子 (SBBulletinNotificationSource addBulletin —— 成熟钩点)
+    id clsBBS = objc_getClass("SBBulletinNotificationSource");
+    if (clsBBS) {
+        MSHookMessageEx((Class)clsBBS, sel_registerName("observer:addBulletin:forFeed:playLightsAndSirens:withReply:"), (IMP)hookBBSObserver, (IMP *)&origBBSObserver);
+        ProbeWrite("BBS-HOOK");
     }
     static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
