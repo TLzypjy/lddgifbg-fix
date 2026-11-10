@@ -904,71 +904,6 @@ static id HookBNDInit(id self, SEL _c) {
     if (r) gPresentLayer = r;
     return r;
 }
-// 2.00: 通知内容模型探针 —— SBBannerManager postPresentable 时转储 presentable 的
-// ivar 树 (类名/字符串属性/子对象), 定位通知标题/正文/app名在模型里的确切位置。
-// 只读不改, 全程 @try 包裹, budget 限行数。
-static int gDumpBudget = 0;
-static void LDDDumpObj(id obj, int depth, const char *tag) {
-    if (!obj || depth > 3 || gDumpBudget <= 0) return;
-    @try {
-        Class cls = ((Class(*)(id, SEL))objc_msgSend)(obj, sel_registerName("class"));
-        const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
-        char hd[160];
-        snprintf(hd, sizeof(hd), "DMP d%d %s cls=%s", depth, tag, cn ? cn : "?");
-        ProbeWrite(hd);
-        gDumpBudget--;
-        unsigned int cnt = 0;
-        void *ivs = class_copyIvarList((Class)cls, &cnt);
-        if (ivs) {
-            for (unsigned int i = 0; i < cnt && gDumpBudget > 0; i++) {
-                void *iv = ((void **)ivs)[i];
-                const char *in = ivar_getName(iv);
-                const char *te = ivar_getTypeEncoding(iv);
-                if (!in || !te || te[0] != '@' || te[1] == '?') continue;
-                id val = object_getIvar(obj, iv);
-                if (!val) {
-                    char lb[160];
-                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = nil", depth, in);
-                    ProbeWrite(lb);
-                    gDumpBudget--;
-                    continue;
-                }
-                Class vc = ((Class(*)(id, SEL))objc_msgSend)(val, sel_registerName("class"));
-                const char *vn = vc ? class_getName((__bridge void *)vc) : "?";
-                if (vn && strstr(vn, "String")) {
-                    const char *vs = ((const char *(*)(id, SEL))objc_msgSend)(val, sel_registerName("UTF8String"));
-                    char lb[320];
-                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = STR[%s]", depth, in, vs ? vs : "");
-                    ProbeWrite(lb);
-                    gDumpBudget--;
-                } else {
-                    char lb[160];
-                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = obj(%s)", depth, in, vn ? vn : "?");
-                    ProbeWrite(lb);
-                    gDumpBudget--;
-                    if (depth < 3 && vn && !strstr(vn, "View")) LDDDumpObj(val, depth + 1, in);
-                }
-            }
-            free(ivs);
-        }
-        if (depth == 0) {
-            unsigned int mcnt = 0;
-            void *ms = class_copyMethodList((Class)cls, &mcnt);
-            if (ms) {
-                for (unsigned int i = 0; i < mcnt && gDumpBudget > 0; i++) {
-                    void *mth = ((void **)ms)[i];
-                    SEL sl = ((SEL(*)(void *))method_getName)(mth);
-                    const char *mn = sl ? sel_getName(sl) : "?";
-                    char lb[200];
-                    snprintf(lb, sizeof(lb), "DMP-M %s", mn ? mn : "?");
-                    ProbeWrite(lb);
-                    gDumpBudget--;
-                }
-                free(ms);
-            }
-        }
-    } @catch (id e) { ProbeWrite("DMP-EXC"); }
-}
 // 2.03: bulletin 钩子 (通知内容模型 —— 十年成熟钩点, bulletin 对象自带标题/正文/app名)
 // 2.03: 转储挪后台线程 —— dump 里的消息发送可能触发别的类 +initialize (内部同步读 cfprefsd),
 // 在主线程上跑会卡死主线程被看门狗杀进安全模式 (v2.02 实锤); 后台线程随便等, 主线程只留原调用
@@ -978,10 +913,17 @@ static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, id feed
     if (origBBSObserver) origBBSObserver(self, _cmd, observer, bl, fd, pls, reply);
     dispatch_after(dispatch_time(0, (int64_t)(1.0 * 1000000000LL)), dispatch_get_global_queue(0, 0), ^{
         @try {
-            gDumpBudget = 120;
-            ProbeWrite("BB-HIT");
-            LDDDumpObj(bl, 0, "bulletin");
-            LDDDumpObj(fd, 1, "feed");
+            NSString *ti = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("title"));
+            NSString *ms = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("message"));
+            NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("section"));
+            NSString *au = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("author"));
+            gBBTitle = ti; gBBMsg = ms; gBBApp = sc;
+            const char *cs1 = ti ? ((const char *(*)(id, SEL))objc_msgSend)(ti, sel_registerName("UTF8String")) : "";
+            const char *cs2 = ms ? ((const char *(*)(id, SEL))objc_msgSend)(ms, sel_registerName("UTF8String")) : "";
+            const char *cs3 = sc ? ((const char *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("UTF8String")) : "";
+            char dline[600];
+            snprintf(dline, sizeof(dline), "BB-DATA title=[%.180s] msg=[%.220s] app=[%.80s]", cs1 ? cs1 : "", cs2 ? cs2 : "", cs3 ? cs3 : "");
+            ProbeWrite(dline);
         } @catch (id e) { }
     });
 }
@@ -1331,26 +1273,6 @@ static void LDDIslandLayout(id self) {
                         ProbeWrite("HAV-BEGIN");
                         LDDHarvestLabels(supvB, 0);
                         ProbeWrite("HAV-END");
-                        NSString *tree = (NSString *)((id(*)(id, SEL))objc_msgSend)(supvB, sel_registerName("recursiveDescription"));
-                        const char *cs = tree ? ((const char *(*)(id, SEL))objc_msgSend)(tree, sel_registerName("UTF8String")) : (const char *)0;
-                        if (cs && cs[0]) {
-                            ProbeWrite("TREE-BEGIN");
-                            const char *p = cs;
-                            int tln = 0;
-                            while (p && p[0] && tln < 300) {
-                                const char *e = strchr(p, '\n');
-                                size_t len = e ? (size_t)(e - p) : strlen(p);
-                                if (len > 180) len = 180;
-                                char tbuf[192];
-                                memcpy(tbuf, p, len);
-                                tbuf[len] = 0;
-                                ProbeWrite(tbuf);
-                                tln++;
-                                if (!e) break;
-                                p = e + 1;
-                            }
-                            ProbeWrite("TREE-END");
-                        }
                     } @catch (id e) { ProbeWrite("HAV-EXC"); }
                 }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
@@ -1942,7 +1864,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.03");
+    ProbeWrite("LDD-BUILD v2.04");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
