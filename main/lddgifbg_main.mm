@@ -1936,7 +1936,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.01");
+    ProbeWrite("LDD-BUILD v2.02");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
@@ -1962,8 +1962,8 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
-    // 2.01: 通知内容钩子 (SBBulletinNotificationSource addBulletin —— 成熟钩点)
-    id clsBBS = objc_getClass("SBBulletinNotificationSource");
+    // 2.02: 通知内容钩子 (NCBulletinNotificationSource addBulletin —— 成熟钩点)
+    id clsBBS = objc_getClass("NCBulletinNotificationSource");
     if (clsBBS) {
         MSHookMessageEx((Class)clsBBS, sel_registerName("observer:addBulletin:forFeed:playLightsAndSirens:withReply:"), (IMP)hookBBSObserver, (IMP *)&origBBSObserver);
         ProbeWrite("BBS-HOOK");
