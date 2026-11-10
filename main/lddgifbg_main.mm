@@ -37,6 +37,14 @@ extern "C" void *dlopen(const char *path, int mode);
 extern "C" void MSHookMessageEx(Class _class, SEL _sel, IMP _replacement, IMP *_result);
 extern "C" int objc_getClassList(void *buffer, int bufferLen);
 extern "C" const char *class_getName(void *cls);
+// 2.00: 通知内容模型探针 (presentable ivar 树转储)
+extern "C" void *class_copyIvarList(void *cls, unsigned int *count);
+extern "C" const char *ivar_getName(void *iv);
+extern "C" const char *ivar_getTypeEncoding(void *iv);
+extern "C" id object_getIvar(id obj, void *iv);
+extern "C" void *class_copyMethodList(void *cls, unsigned int *count);
+extern "C" SEL method_getName(void *m);
+extern "C" const char *sel_getName(SEL s);
 extern "C" void *class_copyMethodList(Class cls, unsigned int *count);
 extern "C" void *method_getName(void *method);
 extern "C" const char *method_getTypeEncoding(void *method);
@@ -898,6 +906,82 @@ static id HookBNDInit(id self, SEL _c) {
     if (r && !gPresentLayer) ProbeWrite("BND-CAPTURED");
     if (r) gPresentLayer = r;
     return r;
+}
+// 2.00: 通知内容模型探针 —— SBBannerManager postPresentable 时转储 presentable 的
+// ivar 树 (类名/字符串属性/子对象), 定位通知标题/正文/app名在模型里的确切位置。
+// 只读不改, 全程 @try 包裹, budget 限行数。
+static int gDumpBudget = 0;
+static void LDDDumpObj(id obj, int depth, const char *tag) {
+    if (!obj || depth > 3 || gDumpBudget <= 0) return;
+    @try {
+        Class cls = ((Class(*)(id, SEL))objc_msgSend)(obj, sel_registerName("class"));
+        const char *cn = cls ? class_getName((__bridge void *)cls) : (const char *)0;
+        char hd[160];
+        snprintf(hd, sizeof(hd), "DMP d%d %s cls=%s", depth, tag, cn ? cn : "?");
+        ProbeWrite(hd);
+        gDumpBudget--;
+        unsigned int cnt = 0;
+        void *ivs = class_copyIvarList((__bridge void *)cls, &cnt);
+        if (ivs) {
+            for (unsigned int i = 0; i < cnt && gDumpBudget > 0; i++) {
+                void *iv = ((void **)ivs)[i];
+                const char *in = ivar_getName(iv);
+                const char *te = ivar_getTypeEncoding(iv);
+                if (!in || !te || te[0] != '@' || te[1] == '?') continue;
+                id val = object_getIvar(obj, iv);
+                if (!val) {
+                    char lb[160];
+                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = nil", depth, in);
+                    ProbeWrite(lb);
+                    gDumpBudget--;
+                    continue;
+                }
+                Class vc = ((Class(*)(id, SEL))objc_msgSend)(val, sel_registerName("class"));
+                const char *vn = vc ? class_getName((__bridge void *)vc) : "?";
+                if (vn && strstr(vn, "String")) {
+                    const char *vs = ((const char *(*)(id, SEL))objc_msgSend)(val, sel_registerName("UTF8String"));
+                    char lb[320];
+                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = STR[%s]", depth, in, vs ? vs : "");
+                    ProbeWrite(lb);
+                    gDumpBudget--;
+                } else {
+                    char lb[160];
+                    snprintf(lb, sizeof(lb), "DMP-IV d%d %s = obj(%s)", depth, in, vn ? vn : "?");
+                    ProbeWrite(lb);
+                    gDumpBudget--;
+                    if (depth < 3 && vn && !strstr(vn, "View")) LDDDumpObj(val, depth + 1, in);
+                }
+            }
+            free(ivs);
+        }
+        if (depth == 0) {
+            unsigned int mcnt = 0;
+            void *ms = class_copyMethodList((__bridge void *)cls, &mcnt);
+            if (ms) {
+                for (unsigned int i = 0; i < mcnt && gDumpBudget > 0; i++) {
+                    void *mth = ((void **)ms)[i];
+                    SEL sl = ((SEL(*)(void *))method_getName)(mth);
+                    const char *mn = sl ? sel_getName(sl) : "?";
+                    char lb[200];
+                    snprintf(lb, sizeof(lb), "DMP-M %s", mn ? mn : "?");
+                    ProbeWrite(lb);
+                    gDumpBudget--;
+                }
+                free(ms);
+            }
+        }
+    } @catch (id e) { ProbeWrite("DMP-EXC"); }
+}
+static void (*origBMPresent)(id, SEL, id, id, id, void *);
+static void hookBMPresent(id self, SEL _cmd, id presentable, id options, id userInfo, void *err) {
+    @try {
+        gDumpBudget = 150;
+        ProbeWrite("BMP-HIT");
+        LDDDumpObj(presentable, 0, "presentable");
+        LDDDumpObj(options, 1, "options");
+        LDDDumpObj(userInfo, 1, "userInfo");
+    } @catch (id e) { }
+    if (origBMPresent) origBMPresent(self, _cmd, presentable, options, userInfo, err);
 }
 // 1.52 自用版: 1.50/1.51 移植自灵动通知的 4 个钩子(尺寸回调+收起链三钩)已全部移除 ——
 // 尺寸回调呈现路径从不调用(样式无效), 收起链钩子在延迟代收嵌套时 ARC retain 垃圾指针
@@ -1856,7 +1940,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v1.99");
+    ProbeWrite("LDD-BUILD v2.00");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
@@ -1882,6 +1966,12 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
+    // 2.00: 通知内容模型探针钩子 (SBBannerManager postPresentable)
+    id clsBM = objc_getClass("SBBannerManager");
+    if (clsBM) {
+        MSHookMessageEx((Class)clsBM, sel_registerName("postPresentable:withOptions:userInfo:error:"), (IMP)hookBMPresent, (IMP *)&origBMPresent);
+        ProbeWrite("BMP-HOOK");
+    }
     static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
         PostRealNotification();
