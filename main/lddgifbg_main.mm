@@ -907,6 +907,7 @@ static id HookBNDInit(id self, SEL _c) {
 // 2.03: bulletin 钩子 (通知内容模型 —— 十年成熟钩点, bulletin 对象自带标题/正文/app名)
 // 2.03: 转储挪后台线程 —— dump 里的消息发送可能触发别的类 +initialize (内部同步读 cfprefsd),
 // 在主线程上跑会卡死主线程被看门狗杀进安全模式 (v2.02 实锤); 后台线程随便等, 主线程只留原调用
+static NSString *gBBTitle = nil, *gBBMsg = nil, *gBBApp = nil;
 static void (*origBBSObserver)(id, SEL, id, id, id, BOOL, id);
 static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, id feed, BOOL pls, id reply) {
     id bl = bulletin, fd = feed;
