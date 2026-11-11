@@ -918,7 +918,6 @@ static id HookBNDInit(id self, SEL _c) {
 static NSString *gBBTitle = nil, *gBBMsg = nil, *gBBApp = nil;
 // 3.01: card globals (shared by bulletin hook + card renderer)
 static NSString *gCardTitle = nil, *gCardContent = nil, *gCardAppName = nil;
-static double gBBPendingTs = 0;
 static double gCardShowTs = 0;
 static id gCardWin = nil;
 static id gCardHiddenView = nil;
