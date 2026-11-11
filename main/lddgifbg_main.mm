@@ -909,10 +909,9 @@ static id HookBNDInit(id self, SEL _c) {
 // 2.03: 转储挪后台线程 —— dump 里的消息发送可能触发别的类 +initialize (内部同步读 cfprefsd),
 // 在主线程上跑会卡死主线程被看门狗杀进安全模式 (v2.02 实锤); 后台线程随便等, 主线程只留原调用
 static NSString *gBBTitle = nil, *gBBMsg = nil, *gBBApp = nil;
-static void (*origBBSObserver)(id, SEL, id, id, id, BOOL, id);
-static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, id feed, BOOL pls, id reply) {
-    id bl = bulletin, fd = feed;
-    if (origBBSObserver) origBBSObserver(self, _cmd, observer, bl, fd, pls, reply);
+static void (*origBBSObserver)(id, SEL, id, id, unsigned long long, BOOL, id);
+static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigned long long feed, BOOL pls, id reply) {
+    if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
     dispatch_after(dispatch_time(0, (int64_t)(1.0 * 1000000000LL)), dispatch_get_global_queue(0, 0), ^{
         @try {
             NSString *ti = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("title"));
@@ -1865,7 +1864,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.05");
+    ProbeWrite("LDD-BUILD v3.00");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
@@ -1900,7 +1899,7 @@ static void LDDInit(void) {
         char eb[200];
         snprintf(eb, sizeof(eb), "BBS-ENC [%s]", enc ? enc : "nil");
         ProbeWrite(eb);
-        if (enc && strcmp(enc, "v56@0:8@16@24@32B40@48") == 0) {
+        if (enc && strcmp(enc, "v52@0:8@16@24Q32B40@?44") == 0) {
             MSHookMessageEx((Class)clsBBS, sbbs, (IMP)hookBBSObserver, (IMP *)&origBBSObserver);
             ProbeWrite("BBS-HOOK");
         } else {
