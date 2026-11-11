@@ -1120,10 +1120,10 @@ static UIImage *LDDCardBgImage(void) {
 static void LDDShowNotifCard(CGRect pill) {
     @try {
         double sw = [[UIScreen mainScreen] bounds].w;
-        double cw = sw - 12.0;
-        double ch = 76.0;
-        double cx = 6.0;
-        double cy = 54.0;
+        double cw = sw - 16.0;
+        double ch = 100.0;
+        double cx = 8.0;
+        double cy = 2.0;
         if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
         id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
         // 3.04: iOS16 必须绑 windowScene, 否则窗口不上屏
@@ -1143,42 +1143,42 @@ static void LDDShowNotifCard(CGRect pill) {
         [biv setContentMode:2];
         [cv addSubview:biv];
         UIView *dim = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
-        [dim setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.35]];
+        [dim setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.20]];
         [cv addSubview:dim];
-        UIView *ic = [[UIView alloc] initWithFrame:MakeRect(12, (ch - 44) / 2.0, 44, 44)];
+        UIView *ic = [[UIView alloc] initWithFrame:MakeRect(18, (ch - 52) / 2.0, 52, 52)];
         [ic setBackgroundColor:[UIColor colorWithWhite:0.2 alpha:1.0]];
-        [[ic layer] setCornerRadius:22.0];
+        [[ic layer] setCornerRadius:26.0];
         [cv addSubview:ic];
-        UILabel *icl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 44, 44)];
+        UILabel *icl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 52, 52)];
         [icl setTextAlignment:1];
         [icl setFont:[UIFont boldSystemFontOfSize:18.0]];
         [icl setTextColor:[UIColor whiteColor]];
         [icl setText:@"通"];
         [ic addSubview:icl];
-        double tx = 68.0;
-        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(tx, 6, 120, 14)];
+        double tx = 84.0;
+        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(tx, 12, 100, 14)];
         [tl setText:@"鐜板湪"];
         [tl setFont:[UIFont systemFontOfSize:11.0]];
         [tl setTextColor:[UIColor colorWithWhite:1.0 alpha:0.75]];
         [cv addSubview:tl];
-        UILabel *al = [[UILabel alloc] initWithFrame:MakeRect(cw - 140, 6, 130, 14)];
+        UILabel *al = [[UILabel alloc] initWithFrame:MakeRect(cw - 160, 12, 150, 14)];
         [al setText:gCardAppName];
         [al setTextAlignment:2];
         [al setFont:[UIFont systemFontOfSize:11.0]];
         [al setTextColor:[UIColor colorWithWhite:1.0 alpha:0.75]];
         [cv addSubview:al];
-        UILabel *ti = [[UILabel alloc] initWithFrame:MakeRect(tx, 22, cw - tx - 14, 20)];
+        UILabel *ti = [[UILabel alloc] initWithFrame:MakeRect(tx, 32, cw - tx - 20, 22)];
         [ti setText:gCardTitle];
         [ti setFont:[UIFont boldSystemFontOfSize:15.0]];
         [ti setTextColor:[UIColor whiteColor]];
         [cv addSubview:ti];
-        UILabel *ms = [[UILabel alloc] initWithFrame:MakeRect(tx, 44, cw - tx - 14, 36)];
+        UILabel *ms = [[UILabel alloc] initWithFrame:MakeRect(tx, 56, cw - tx - 20, 38)];
         [ms setText:gCardContent];
         [ms setFont:[UIFont systemFontOfSize:14.0]];
         [ms setTextColor:[UIColor whiteColor]];
         [ms setNumberOfLines:2];
         [cv addSubview:ms];
-        [[cv layer] setCornerRadius:38.0];
+        [[cv layer] setCornerRadius:50.0];
         [[cv layer] setMasksToBounds:YES];
         [win setFrame:MakeRect(pill.ox, pill.oy, pill.w, pill.h)];
         [win setHidden:NO];
