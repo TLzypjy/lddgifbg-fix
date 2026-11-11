@@ -925,22 +925,23 @@ static id gCardHiddenView = nil;
 static int gCardSysHidden = 0;
 static void (*origBBSObserver)(id, SEL, id, id, unsigned long long, BOOL, id);
 static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigned long long feed, BOOL pls, id reply) {
+    @try {
+        gCardTitle = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("title"));
+        gCardContent = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("message"));
+        NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("section"));
+        @try { id ac = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("SBApplicationController"), sel_registerName("sharedInstance")); if (ac) { id ap = ((id(*)(id, SEL, id))objc_msgSend)(ac, sel_registerName("applicationForBundleIdentifier:"), sc); if (ap) { id dn = ((id(*)(id, SEL))objc_msgSend)(ap, sel_registerName("displayName")); if (dn) gCardAppName = dn; } } } @catch (id e) { }
+        char dline[600];
+        const char *cs1 = gCardTitle ? ((const char *(*)(id, SEL))objc_msgSend)(gCardTitle, sel_registerName("UTF8String")) : "";
+        const char *cs2 = gCardContent ? ((const char *(*)(id, SEL))objc_msgSend)(gCardContent, sel_registerName("UTF8String")) : "";
+        const char *cs3 = gCardAppName ? ((const char *(*)(id, SEL))objc_msgSend)(gCardAppName, sel_registerName("UTF8String")) : "";
+        snprintf(dline, sizeof(dline), "BB-STASH title=[%.180s] msg=[%.220s] app=[%.80s]", cs1 ? cs1 : "", cs2 ? cs2 : "", cs3 ? cs3 : "");
+        ProbeWrite(dline);
+        // 3.02: 0.5s 后主队列弹卡片 (等系统横幅先落地, 我们的窗口盖上去)
+        dispatch_after(dispatch_time(0, (int64_t)(0.5 * 1000000000LL)), &_dispatch_main_q, ^{
+            @try { LDDShowNotifCard(MakeRect(107, 6, 216, 37)); } @catch (id e) { }
+        });
+    } @catch (id e) { }
     if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
-    dispatch_after(dispatch_time(0, (int64_t)(1.0 * 1000000000LL)), dispatch_get_global_queue(0, 0), ^{
-        @try {
-            NSString *ti = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("title"));
-            NSString *ms = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("message"));
-            NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("section"));
-            gBBTitle = ti; gBBMsg = ms; gBBApp = sc;
-            @try { id ac = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("SBApplicationController"), sel_registerName("sharedInstance")); if (ac) { id ap = ((id(*)(id, SEL, id))objc_msgSend)(ac, sel_registerName("applicationForBundleIdentifier:"), sc); if (ap) { id dn = ((id(*)(id, SEL))objc_msgSend)(ap, sel_registerName("displayName")); if (dn) gCardAppName = dn; } } } @catch (id e) { }
-            const char *cs1 = ti ? ((const char *(*)(id, SEL))objc_msgSend)(ti, sel_registerName("UTF8String")) : "";
-            const char *cs2 = ms ? ((const char *(*)(id, SEL))objc_msgSend)(ms, sel_registerName("UTF8String")) : "";
-            const char *cs3 = sc ? ((const char *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("UTF8String")) : "";
-            char dline[600];
-            snprintf(dline, sizeof(dline), "BB-DATA title=[%.180s] msg=[%.220s] app=[%.80s]", cs1 ? cs1 : "", cs2 ? cs2 : "", cs3 ? cs3 : "");
-            ProbeWrite(dline);
-        } @catch (id e) { }
-    });
 }
 // 1.52 自用版: 1.50/1.51 移植自灵动通知的 4 个钩子(尺寸回调+收起链三钩)已全部移除 ——
 // 尺寸回调呈现路径从不调用(样式无效), 收起链钩子在延迟代收嵌套时 ARC retain 垃圾指针
@@ -1379,12 +1380,6 @@ static void LDDIslandLayout(id self) {
                         LDDHarvestLabels(supvB, 0);
                         ProbeWrite("HAV-END");
                     } @catch (id e) { ProbeWrite("HAV-EXC"); }
-                }
-                // 3.01: notification card - bulletin fresh (<3s) + container present -> pop card
-                if (gBBPendingTs > 0 && time(0) - gBBPendingTs <= 3 && !gCardWin && time(0) - gCardShowTs > 6) {
-                    CGRect pillScr = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
-                    LDDShowNotifCard(pillScr);
-                    gBBPendingTs = 0;
                 }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 [view removeFromSuperview];
