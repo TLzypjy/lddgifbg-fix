@@ -1383,7 +1383,7 @@ static void LDDIslandLayout(id self) {
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 // 3.01: notification card - bulletin fresh (<3s) + container present -> pop card
                 if (gBBPendingTs > 0 && time(0) - gBBPendingTs <= 3 && !gCardWin && time(0) - gCardShowTs > 6) {
-                    CGRect pillScr = ((CGRect(*)(id, SEL, id, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
+                    CGRect pillScr = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
                     LDDShowNotifCard(pillScr);
                     gBBPendingTs = 0;
                 }
