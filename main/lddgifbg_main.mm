@@ -1085,6 +1085,99 @@ static void ShowBlock(id self, int colorIsRed) {
 }
 
 // ---------- layoutSubviews hook ----------
+// 3.01: notification card engine v1 (standard style) - own window card, pops from island pill
+static NSString *gCardTitle = nil, *gCardContent = nil, *gCardAppName = nil;
+static double gBBPendingTs = 0;
+static double gCardShowTs = 0;
+static id gCardWin = nil;
+static id gCardHiddenView = nil;
+static UIImage *LDDCardBgImage(void) {
+    NSString *p = GetSelectedImagePath();
+    if (!p) return nil;
+    NSData *d = [NSData dataWithContentsOfFile:p];
+    if (!d) return nil;
+    void *src = CGImageSourceCreateWithData((__bridge void *)d, 0);
+    if (!src) return nil;
+    CGImageRef cg = CGImageSourceCreateImageAtIndex(src, 0, 0);
+    CFRelease(src);
+    if (!cg) return nil;
+    UIImage *img = [UIImage imageWithCGImage:cg scale:1.0 orientation:0];
+    CFRelease(cg);
+    return img;
+}
+static void LDDShowNotifCard(CGRect pill) {
+    @try {
+        double sw = [[UIScreen mainScreen] bounds].w;
+        double cw = sw - 12.0;
+        double ch = 84.0;
+        double cx = 6.0;
+        double cy = pill.oy;
+        if (cy < 8.0) cy = 8.0;
+        if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
+        id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
+        [win setWindowLevel:10000];
+        UIView *cv = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
+        [cv setAutoresizingMask:18];
+        [win addSubview:cv];
+        UIImage *bg = LDDCardBgImage();
+        UIImageView *biv = [[UIImageView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
+        if (bg) {
+            CGSize isz = [bg size];
+            double sc = (cw / isz.w) > (ch / isz.h) ? (cw / isz.w) : (ch / isz.h);
+            double dw = isz.w * sc, dh = isz.h * sc;
+            [biv setFrame:MakeRect((cw - dw) / 2.0, (ch - dh) / 2.0, dw, dh)];
+            [biv setImage:bg];
+        }
+        [biv setContentMode:2];
+        [cv addSubview:biv];
+        UIView *dim = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
+        [dim setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.35]];
+        [cv addSubview:dim];
+        UIView *ic = [[UIView alloc] initWithFrame:MakeRect(12, (ch - 44) / 2.0, 44, 44)];
+        [ic setBackgroundColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
+        [[ic layer] setCornerRadius:22.0];
+        [[ic layer] setBorderWidth:1.5];
+        [[ic layer] setBorderColor:(CGColorRef)[[UIColor whiteColor] CGColor]];
+        [cv addSubview:ic];
+        double tx = 68.0;
+        UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(tx, 6, 120, 14)];
+        [tl setText:@"鐜板湪"];
+        [tl setFont:[UIFont systemFontOfSize:11.0]];
+        [tl setTextColor:[UIColor colorWithWhite:1.0 alpha:0.75]];
+        [cv addSubview:tl];
+        UILabel *al = [[UILabel alloc] initWithFrame:MakeRect(cw - 140, 6, 130, 14)];
+        [al setText:gCardAppName];
+        [al setTextAlignment:2];
+        [al setFont:[UIFont systemFontOfSize:11.0]];
+        [al setTextColor:[UIColor colorWithWhite:1.0 alpha:0.75]];
+        [cv addSubview:al];
+        UILabel *ti = [[UILabel alloc] initWithFrame:MakeRect(tx, 22, cw - tx - 14, 20)];
+        [ti setText:gCardTitle];
+        [ti setFont:[UIFont boldSystemFontOfSize:15.0]];
+        [ti setTextColor:[UIColor whiteColor]];
+        [cv addSubview:ti];
+        UILabel *ms = [[UILabel alloc] initWithFrame:MakeRect(tx, 44, cw - tx - 14, 36)];
+        [ms setText:gCardContent];
+        [ms setFont:[UIFont systemFontOfSize:14.0]];
+        [ms setTextColor:[UIColor whiteColor]];
+        [ms setNumberOfLines:2];
+        [cv addSubview:ms];
+        [[cv layer] setCornerRadius:38.0];
+        [[cv layer] setMasksToBounds:YES];
+        [win setFrame:MakeRect(pill.ox, pill.oy, pill.w, pill.h)];
+        [win setHidden:NO];
+        gCardWin = win;
+        gCardShowTs = time(0);
+        CGRect full = MakeRect(cx, cy, cw, ch);
+        [UIView animateWithDuration:0.5 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.3 options:0 animations:^{ [win setFrame:full]; } completion:nil];
+        dispatch_after(dispatch_time(0, (int64_t)(4.5 * 1000000000LL)), &_dispatch_main_q, ^{
+            @try {
+                if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
+                if (gCardHiddenView) { [gCardHiddenView setHidden:NO]; gCardHiddenView = nil; }
+            } @catch (id e) { }
+        });
+    } @catch (id e) { ProbeWrite("CARD-EXC"); }
+}
 // 1.99: 横幅文字收割器 —— 递归收集容器内 UILabel 的 文字/尺寸/坐标/字号, 通知卡片文字布局的数据源
 static void LDDHarvestLabels(id v, int depth) {
     if (!v || depth > 12) return;
@@ -1265,6 +1358,8 @@ static void LDDIslandLayout(id self) {
                 [view setFrame:MakeRect(0, 0, sbB.w, sbB.h)];
                 static int bgx = 0;
                 if (bgx < 8) { bgx++; ProbeWrite("BG-EXTEND"); }
+                // 3.01: while card active, hide system content layer (text/icon rendered by card)
+                if (gCardWin) { [self setHidden:YES]; gCardSysHidden = 1; gCardHiddenView = self; }
                 // 1.99: 横幅收割 —— 2.5s 冷却, 抓 UILabel 文字坐标 + 带文字的视图树 (卡片开发数据)
                 static time_t gHavLast = 0;
                 if (time(0) - gHavLast >= 2) {
@@ -1272,10 +1367,21 @@ static void LDDIslandLayout(id self) {
                     @try {
                         ProbeWrite("HAV-BEGIN");
                         LDDHarvestLabels(supvB, 0);
+                        // 3.01: app name harvest (right-top 11pt short label)
+                        if (gCardAppName == nil || gCardAppName.length == 0) {
+                            id cand = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("text"));
+                            if (cand) { double w = f.w; if (w > 20 && w < 150 && psz >= 10.4 && psz <= 11.6) gCardAppName = cand; }
+                        }
                         ProbeWrite("HAV-END");
                     } @catch (id e) { ProbeWrite("HAV-EXC"); }
                 }
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
+                // 3.01: notification card - bulletin fresh (<3s) + container present -> pop card
+                if (gBBPendingTs > 0 && time(0) - gBBPendingTs <= 3 && !gCardWin && time(0) - gCardShowTs > 6) {
+                    CGRect pillScr = ((CGRect(*)(id, SEL, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
+                    LDDShowNotifCard(pillScr);
+                    gBBPendingTs = 0;
+                }
                 [view removeFromSuperview];
                 [self insertSubview:view atIndex:0];
             }
@@ -1864,7 +1970,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v3.00");
+    ProbeWrite("LDD-BUILD v3.01");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
