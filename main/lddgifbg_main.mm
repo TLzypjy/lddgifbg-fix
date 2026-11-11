@@ -1121,10 +1121,9 @@ static void LDDShowNotifCard(CGRect pill) {
     @try {
         double sw = [[UIScreen mainScreen] bounds].w;
         double cw = sw - 12.0;
-        double ch = 84.0;
+        double ch = 76.0;
         double cx = 6.0;
-        double cy = pill.oy;
-        if (cy < 8.0) cy = 8.0;
+        double cy = 54.0;
         if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
         id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
         // 3.04: iOS16 必须绑 windowScene, 否则窗口不上屏
@@ -1147,11 +1146,15 @@ static void LDDShowNotifCard(CGRect pill) {
         [dim setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.35]];
         [cv addSubview:dim];
         UIView *ic = [[UIView alloc] initWithFrame:MakeRect(12, (ch - 44) / 2.0, 44, 44)];
-        [ic setBackgroundColor:[UIColor colorWithWhite:0.15 alpha:1.0]];
+        [ic setBackgroundColor:[UIColor colorWithWhite:0.2 alpha:1.0]];
         [[ic layer] setCornerRadius:22.0];
-        [[ic layer] setBorderWidth:1.5];
-        [[ic layer] setBorderColor:(CGColorRef)[[UIColor whiteColor] CGColor]];
         [cv addSubview:ic];
+        UILabel *icl = [[UILabel alloc] initWithFrame:MakeRect(0, 0, 44, 44)];
+        [icl setTextAlignment:1];
+        [icl setFont:[UIFont boldSystemFontOfSize:18.0]];
+        [icl setTextColor:[UIColor whiteColor]];
+        [icl setText:@"通"];
+        [ic addSubview:icl];
         double tx = 68.0;
         UILabel *tl = [[UILabel alloc] initWithFrame:MakeRect(tx, 6, 120, 14)];
         [tl setText:@"鐜板湪"];
