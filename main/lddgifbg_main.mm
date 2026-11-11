@@ -40,6 +40,7 @@ extern "C" const char *class_getName(void *cls);
 // 2.00: 通知内容模型探针 (presentable ivar 树转储)
 extern "C" const char *ivar_getName(void *iv);
 extern "C" const char *ivar_getTypeEncoding(void *iv);
+extern "C" const char *method_getTypeEncoding(void *m);
 extern "C" id object_getIvar(id obj, void *iv);
 extern "C" void *class_copyMethodList(Class cls, unsigned int *count);
 extern "C" void *method_getName(void *method);
@@ -1864,7 +1865,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v2.04");
+    ProbeWrite("LDD-BUILD v2.05");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
@@ -1890,11 +1891,21 @@ static void LDDInit(void) {
     // 捕获横幅呈现层 (SBNotificationBannerDestination init)
     id clsBND = objc_getClass("SBNotificationBannerDestination");
     if (clsBND) { MSHookMessageEx((Class)clsBND, sel_registerName("init"), (IMP)HookBNDInit, (IMP *)&origBNDInit); ProbeWrite("BND-HOOK"); }
-    // 2.02: 通知内容钩子 (NCBulletinNotificationSource addBulletin —— 成熟钩点)
+    // 2.05: 通知内容钩子 —— 先验方法真实类型编码, 匹配才挂钩 (v2.02/2.04 崩溃疑似签名不符)
     id clsBBS = objc_getClass("NCBulletinNotificationSource");
     if (clsBBS) {
-        MSHookMessageEx((Class)clsBBS, sel_registerName("observer:addBulletin:forFeed:playLightsAndSirens:withReply:"), (IMP)hookBBSObserver, (IMP *)&origBBSObserver);
-        ProbeWrite("BBS-HOOK");
+        SEL sbbs = sel_registerName("observer:addBulletin:forFeed:playLightsAndSirens:withReply:");
+        void *mm = class_getInstanceMethod((Class)clsBBS, sbbs);
+        const char *enc = mm ? ((const char *(*)(void *))method_getTypeEncoding)(mm) : (const char *)0;
+        char eb[200];
+        snprintf(eb, sizeof(eb), "BBS-ENC [%s]", enc ? enc : "nil");
+        ProbeWrite(eb);
+        if (enc && strcmp(enc, "v56@0:8@16@24@32B40@48") == 0) {
+            MSHookMessageEx((Class)clsBBS, sbbs, (IMP)hookBBSObserver, (IMP *)&origBBSObserver);
+            ProbeWrite("BBS-HOOK");
+        } else {
+            ProbeWrite("BBS-ENC-MISMATCH-SKIP");
+        }
     }
     static int notifyTok = 0;
     notify_register_dispatch("com.tlzypjy.github/TestNotification", &notifyTok, (void *)&_dispatch_main_q, ^(int tok){
