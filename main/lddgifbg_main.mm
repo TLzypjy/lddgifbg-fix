@@ -154,6 +154,7 @@ static void ConsumeForcePreview(void);
 static CGRect MakeRect(double x, double y, double w, double h) { CGRect r = {x, y, w, h}; return r; }
 typedef struct UIEdgeInsets { double top, left, bottom, right; } UIEdgeInsets;
 typedef struct CGAffineTransform { double a, b, c, d, tx, ty; } CGAffineTransform;
+typedef struct CGColor *CGColorRef;
 typedef struct CGSize { double width, height; } CGSize;
 // 1.9.139: 显示区域偏移 (平移内容视图)
 static CGAffineTransform CGMakeTranslate(double tx, double ty) { CGAffineTransform t = {1, 0, 0, 1, tx, ty}; return t; }
@@ -183,6 +184,7 @@ static void PreviewAutoClose(void);
 + (id)blueColor;
 + (id)clearColor;
 + (id)whiteColor;
++ (id)colorWithRed:(double)r green:(double)g blue:(double)b alpha:(double)a;
 + (id)colorWithWhite:(double)w alpha:(double)a;
 @end
 @interface UIFont : NSObject
@@ -234,6 +236,7 @@ static void PreviewAutoClose(void);
 @end
 @interface UIImage : NSObject
 + (id)imageWithContentsOfFile:(NSString *)p;
+- (CGSize)size;
 + (id)imageWithCGImage:(CGImageRef)cg scale:(double)s orientation:(NSInteger)o;
 @end
 @interface UIImageView : UIView
@@ -921,6 +924,7 @@ static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigne
             NSString *ms = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("message"));
             NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("section"));
             gBBTitle = ti; gBBMsg = ms; gBBApp = sc;
+            @try { id ac = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("SBApplicationController"), sel_registerName("sharedInstance")); if (ac) { id ap = ((id(*)(id, SEL, id))objc_msgSend)(ac, sel_registerName("applicationForBundleIdentifier:"), sc); if (ap) { id dn = ((id(*)(id, SEL))objc_msgSend)(ap, sel_registerName("displayName")); if (dn) gCardAppName = dn; } } } @catch (id e) { }
             const char *cs1 = ti ? ((const char *(*)(id, SEL))objc_msgSend)(ti, sel_registerName("UTF8String")) : "";
             const char *cs2 = ms ? ((const char *(*)(id, SEL))objc_msgSend)(ms, sel_registerName("UTF8String")) : "";
             const char *cs3 = sc ? ((const char *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("UTF8String")) : "";
@@ -1370,11 +1374,6 @@ static void LDDIslandLayout(id self) {
                     @try {
                         ProbeWrite("HAV-BEGIN");
                         LDDHarvestLabels(supvB, 0);
-                        // 3.01: app name harvest (right-top 11pt short label)
-                        if (gCardAppName == nil) {
-                            id cand = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("text"));
-                            if (cand) { double w = f.w; if (w > 20 && w < 150 && psz >= 10.4 && psz <= 11.6) gCardAppName = cand; }
-                        }
                         ProbeWrite("HAV-END");
                     } @catch (id e) { ProbeWrite("HAV-EXC"); }
                 }
