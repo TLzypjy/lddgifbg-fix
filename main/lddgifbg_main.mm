@@ -923,6 +923,7 @@ static double gCardShowTs = 0;
 static id gCardWin = nil;
 static id gCardHiddenView = nil;
 static int gCardSysHidden = 0;
+static void LDDShowNotifCard(CGRect pill);
 static void (*origBBSObserver)(id, SEL, id, id, unsigned long long, BOOL, id);
 static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigned long long feed, BOOL pls, id reply) {
     @try {
