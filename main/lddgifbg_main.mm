@@ -238,6 +238,7 @@ static void PreviewAutoClose(void);
 @end
 @interface UIImageView : UIView
 - (id)initWithFrame:(CGRect)r;
+- (CGSize)size;
 - (void)setImage:(id)img;
 - (void)setAnimationImages:(id)images;
 - (void)setAnimationDuration:(double)d;
@@ -260,6 +261,8 @@ static void PreviewAutoClose(void);
 - (void)removeFromSuperlayer;
 - (void)setFrame:(CGRect)r;
 - (void)setCornerRadius:(double)r;
+- (void)setBorderWidth:(double)w;
+- (void)setBorderColor:(CGColorRef)c;
 - (id)superlayer;
 - (void)setMasksToBounds:(BOOL)b;
 @end
@@ -1091,6 +1094,7 @@ static double gBBPendingTs = 0;
 static double gCardShowTs = 0;
 static id gCardWin = nil;
 static id gCardHiddenView = nil;
+static int gCardSysHidden = 0;
 static UIImage *LDDCardBgImage(void) {
     NSString *p = GetSelectedImagePath();
     if (!p) return nil;
@@ -1367,7 +1371,7 @@ static void LDDIslandLayout(id self) {
                         ProbeWrite("HAV-BEGIN");
                         LDDHarvestLabels(supvB, 0);
                         // 3.01: app name harvest (right-top 11pt short label)
-                        if (gCardAppName == nil || gCardAppName.length == 0) {
+                        if (gCardAppName == nil) {
                             id cand = ((id(*)(id, SEL))objc_msgSend)(s, sel_registerName("text"));
                             if (cand) { double w = f.w; if (w > 20 && w < 150 && psz >= 10.4 && psz <= 11.6) gCardAppName = cand; }
                         }
