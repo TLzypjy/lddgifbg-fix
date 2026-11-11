@@ -914,9 +914,9 @@ static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigne
     if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
     dispatch_after(dispatch_time(0, (int64_t)(1.0 * 1000000000LL)), dispatch_get_global_queue(0, 0), ^{
         @try {
-            NSString *ti = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("title"));
-            NSString *ms = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("message"));
-            NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bl, sel_registerName("section"));
+            NSString *ti = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("title"));
+            NSString *ms = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("message"));
+            NSString *sc = ((id(*)(id, SEL))objc_msgSend)(bulletin, sel_registerName("section"));
             gBBTitle = ti; gBBMsg = ms; gBBApp = sc;
             const char *cs1 = ti ? ((const char *(*)(id, SEL))objc_msgSend)(ti, sel_registerName("UTF8String")) : "";
             const char *cs2 = ms ? ((const char *(*)(id, SEL))objc_msgSend)(ms, sel_registerName("UTF8String")) : "";
