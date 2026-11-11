@@ -1127,6 +1127,8 @@ static void LDDShowNotifCard(CGRect pill) {
         if (cy < 8.0) cy = 8.0;
         if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
         id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
+        // 3.04: iOS16 必须绑 windowScene, 否则窗口不上屏
+        @try { id kw = ((id(*)(id, SEL))objc_msgSend)((id)[[UIApplication sharedApplication] keyWindow], sel_registerName("windowScene")); if (kw) [win setWindowScene:kw]; } @catch (id e) { }
         [win setWindowLevel:100000000];
         UIView *cv = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
         [win addSubview:cv];
@@ -1970,7 +1972,7 @@ static void PostRealNotification(void) {
 
 __attribute__((constructor))
 static void LDDInit(void) {
-    ProbeWrite("LDD-BUILD v3.03");
+    ProbeWrite("LDD-BUILD v3.04");
     ProbeWrite("CONSTRUCTOR-RAN");
     // 1.85: 清理历史日志与废弃辅助文件 (探针日志已停用, 0 常驻 IO)
     unlink("/var/mobile/lddgifbg/__bundle_log__.txt");
