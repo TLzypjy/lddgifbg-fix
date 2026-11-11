@@ -1127,7 +1127,7 @@ static void LDDShowNotifCard(CGRect pill) {
         if (cy < 8.0) cy = 8.0;
         if (gCardWin) { [gCardWin setHidden:YES]; gCardWin = nil; }
         id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
-        [win setWindowLevel:10000];
+        [win setWindowLevel:100000000];
         UIView *cv = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
         [win addSubview:cv];
         UIImage *bg = LDDCardBgImage();
