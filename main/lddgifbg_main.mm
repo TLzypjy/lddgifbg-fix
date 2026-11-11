@@ -1117,14 +1117,13 @@ static void LDDShowNotifCard(CGRect pill) {
         id win = [[UIWindow alloc] initWithFrame:MakeRect(cx, cy, cw, ch)];
         [win setWindowLevel:10000];
         UIView *cv = [[UIView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
-        [cv setAutoresizingMask:18];
         [win addSubview:cv];
         UIImage *bg = LDDCardBgImage();
         UIImageView *biv = [[UIImageView alloc] initWithFrame:MakeRect(0, 0, cw, ch)];
         if (bg) {
             CGSize isz = [bg size];
-            double sc = (cw / isz.w) > (ch / isz.h) ? (cw / isz.w) : (ch / isz.h);
-            double dw = isz.w * sc, dh = isz.h * sc;
+            double sc = (cw / isz.width) > (ch / isz.height) ? (cw / isz.width) : (ch / isz.height);
+            double dw = isz.width * sc, dh = isz.height * sc;
             [biv setFrame:MakeRect((cw - dw) / 2.0, (ch - dh) / 2.0, dw, dh)];
             [biv setImage:bg];
         }
