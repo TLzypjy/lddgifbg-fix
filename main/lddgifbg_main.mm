@@ -217,6 +217,7 @@ static void PreviewAutoClose(void);
 - (void)setText:(NSString *)t;
 - (void)setFont:(id)f;
 - (void)setTextColor:(id)c;
+- (CGColorRef)CGColor;
 - (void)setTextAlignment:(NSInteger)a;
 - (void)setNumberOfLines:(NSInteger)n;
 @end
@@ -915,6 +916,13 @@ static id HookBNDInit(id self, SEL _c) {
 // 2.03: 转储挪后台线程 —— dump 里的消息发送可能触发别的类 +initialize (内部同步读 cfprefsd),
 // 在主线程上跑会卡死主线程被看门狗杀进安全模式 (v2.02 实锤); 后台线程随便等, 主线程只留原调用
 static NSString *gBBTitle = nil, *gBBMsg = nil, *gBBApp = nil;
+// 3.01: card globals (shared by bulletin hook + card renderer)
+static NSString *gCardTitle = nil, *gCardContent = nil, *gCardAppName = nil;
+static double gBBPendingTs = 0;
+static double gCardShowTs = 0;
+static id gCardWin = nil;
+static id gCardHiddenView = nil;
+static int gCardSysHidden = 0;
 static void (*origBBSObserver)(id, SEL, id, id, unsigned long long, BOOL, id);
 static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigned long long feed, BOOL pls, id reply) {
     if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
@@ -1093,12 +1101,7 @@ static void ShowBlock(id self, int colorIsRed) {
 
 // ---------- layoutSubviews hook ----------
 // 3.01: notification card engine v1 (standard style) - own window card, pops from island pill
-static NSString *gCardTitle = nil, *gCardContent = nil, *gCardAppName = nil;
-static double gBBPendingTs = 0;
-static double gCardShowTs = 0;
-static id gCardWin = nil;
-static id gCardHiddenView = nil;
-static int gCardSysHidden = 0;
+// (globals declared before hookBBSObserver — shared with card code)
 static UIImage *LDDCardBgImage(void) {
     NSString *p = GetSelectedImagePath();
     if (!p) return nil;
@@ -1380,7 +1383,7 @@ static void LDDIslandLayout(id self) {
             } else if (((id(*)(id, SEL))objc_msgSend)(view, sel_registerName("superview")) != (id)self) {
                 // 3.01: notification card - bulletin fresh (<3s) + container present -> pop card
                 if (gBBPendingTs > 0 && time(0) - gBBPendingTs <= 3 && !gCardWin && time(0) - gCardShowTs > 6) {
-                    CGRect pillScr = ((CGRect(*)(id, SEL, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
+                    CGRect pillScr = ((CGRect(*)(id, SEL, id, id))objc_msgSend)(supvB, sel_registerName("convertRect:toView:"), sbB, (id)0);
                     LDDShowNotifCard(pillScr);
                     gBBPendingTs = 0;
                 }
