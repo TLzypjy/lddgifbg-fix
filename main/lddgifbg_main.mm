@@ -937,7 +937,7 @@ static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigne
         snprintf(dline, sizeof(dline), "BB-STASH title=[%.180s] msg=[%.220s] app=[%.80s]", cs1 ? cs1 : "", cs2 ? cs2 : "", cs3 ? cs3 : "");
         ProbeWrite(dline);
         // 3.02: 0.5s 后主队列弹卡片 (等系统横幅先落地, 我们的窗口盖上去)
-        dispatch_after(dispatch_time(0, (int64_t)(0.5 * 1000000000LL)), &_dispatch_main_q, ^{
+        dispatch_after(dispatch_time(0, (int64_t)(0.05 * 1000000000LL)), &_dispatch_main_q, ^{
             @try { LDDShowNotifCard(MakeRect(107, 6, 216, 37)); } @catch (id e) { }
         });
     } @catch (id e) { }
