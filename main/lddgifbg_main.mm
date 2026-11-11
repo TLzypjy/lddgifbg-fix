@@ -938,7 +938,18 @@ static void hookBBSObserver(id self, SEL _cmd, id observer, id bulletin, unsigne
         ProbeWrite(dline);
         // 3.02: 0.5s 后主队列弹卡片 (等系统横幅先落地, 我们的窗口盖上去)
         dispatch_after(dispatch_time(0, (int64_t)(0.05 * 1000000000LL)), &_dispatch_main_q, ^{
-            @try { LDDShowNotifCard(MakeRect(107, 6, 216, 37)); } @catch (id e) { }
+            @try {
+                double swh = [[UIScreen mainScreen] bounds].w; LDDShowNotifCard(MakeRect(8, 2, swh - 16, 100));
+                // 3.08: 藏系统横幅 —— 从 destination 拿呈现中的 VC 的 view, alpha=0
+                dispatch_after(dispatch_time(0, (int64_t)(0.25 * 1000000000LL)), &_dispatch_main_q, ^{
+                    @try {
+                        if (gPresentLayer) {
+                            id pvc = ((id(*)(id, SEL))objc_msgSend)(gPresentLayer, sel_registerName("presentedPresentableVC"));
+                            if (pvc) { id pv = ((id(*)(id, SEL))objc_msgSend)(pvc, sel_registerName("view")); if (pv) ((void(*)(id, SEL, double))objc_msgSend)(pv, sel_registerName("setAlpha:"), 0.0); }
+                        }
+                    } @catch (id e) { }
+                });
+            } @catch (id e) { }
         });
     } @catch (id e) { }
     if (origBBSObserver) origBBSObserver(self, _cmd, observer, bulletin, feed, pls, reply);
